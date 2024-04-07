@@ -1,5 +1,5 @@
 # HteaPot HTTP Server
-Spanish | [English](README.md)
+Spanish | [English](../README.md)
 
 HteaPot es un servidor HTTP simple escrito en Rust. Te permite servir archivos estáticos y manejar solicitudes HTTP básicas.
 
