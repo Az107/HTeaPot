@@ -1,0 +1,4 @@
+[HTEAPOT]
+port = 8081
+host = "localhost" #test de comentario
+root = "public"
