@@ -2,3 +2,5 @@
 port = 8081
 host = "localhost" #test de comentario
 root = "public"
+[proxy]
+"/test" = "http://example.com:80"
