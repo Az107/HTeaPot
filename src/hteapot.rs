@@ -4,7 +4,6 @@
 
 
 use std::collections::HashMap;
-use std::fmt::format;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
