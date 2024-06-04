@@ -39,7 +39,7 @@ fn main() {
     };
     let server = HteaPot::new(config.host.as_str(), config.port);
     println!("Server started at http://{}:{}", config.host, config.port);
-    server.listen(|req| {
+    server.listen(move |req| {
         println!("Request: {:?}", req.path);
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();

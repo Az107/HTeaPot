@@ -71,7 +71,7 @@ impl config {
     pub fn new_default() -> config {
         config {
             port: 8080,
-            host: "".to_string(),
+            host: "localhost".to_string(),
             root: "./".to_string(),
             index: "index.html".to_string(),
             error: "error.html".to_string(),
