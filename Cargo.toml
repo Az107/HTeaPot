@@ -1,8 +1,17 @@
 [package]
 name = "HTeaPot"
 version = "0.1.0"
-edition = "2021"
+exclude = [
+  "hteapot.toml"
+]
+license = "MIT"
+keywords = ["HTTP", "HTTP-SERVER"]
+description = "HTeaPot is a lightweight HTTP server library designed to be easy to use and extend."
+homepage = "https://github.com/az107/HTeaPot"
+repository = "https://github.com/az107/HTeaPot"
+readme = "README.md"
+categories = ["network-programming", "web-programming"]
+authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
