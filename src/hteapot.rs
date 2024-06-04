@@ -6,11 +6,11 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
+use std::thread;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
-#[derive(Eq)]
-#[derive(Hash)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -25,7 +25,7 @@ pub enum HttpMethod {
 
 
 impl HttpMethod {
-    pub fn from_str(method: &str) -> HttpMethod {
+    fn from_str(method: &str) -> HttpMethod {
         match method {
             "GET" => HttpMethod::GET,
             "POST" => HttpMethod::POST,
@@ -39,7 +39,7 @@ impl HttpMethod {
             _ => panic!("Invalid HTTP method"),
         }
     }
-    pub fn to_str(&self) -> &str {
+    fn to_str(&self) -> &str {
         match self {
             HttpMethod::GET => "GET",
             HttpMethod::POST => "POST",
@@ -163,7 +163,7 @@ impl HteaPot {
     }
 
     // Start the server
-    pub fn listen(&self, action: impl Fn(HttpRequest) -> String ){
+    pub fn listen(&self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static ){
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -173,13 +173,16 @@ impl HteaPot {
                 return;
             }
         };
+        let action_clone = Arc::new(action);
         for stream in listener.incoming() {
             match stream {
                  Ok(stream) => {
-                //     thread::spawn(move || {
-                //         HteaPot::handle_client(stream);
-                //     });
-                    self.handle_client(stream, &action)
+                    let action_clone = action_clone.clone();
+                    thread::spawn(move || {
+                        HteaPot::handle_client(stream, |req| {
+                            action_clone(req)
+                        });
+                    });
    
                 }
                 Err(e) => {
@@ -271,10 +274,17 @@ impl HteaPot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(&self, mut stream: TcpStream , action: impl Fn(HttpRequest) -> String ) {
-        let mut buffer = [0; 1024];
-        stream.read(&mut buffer).unwrap(); //TODO: handle the error
-        let request_buffer = String::from_utf8_lossy(&buffer);
+    fn handle_client(mut stream: TcpStream , action: impl Fn(HttpRequest) -> String ) {
+        let mut request_buffer: String = String::new();
+        loop {
+            let mut buffer = [0; 1024];
+            stream.read(&mut buffer).unwrap_or_default();
+            if buffer[0] == 0 {break};
+            let partial_request_buffer = String::from_utf8_lossy(&buffer).to_string();
+            request_buffer.push_str(&partial_request_buffer);
+            if *buffer.last().unwrap() == 0 {break;}
+        }
+        
         let request = Self::request_parser(&request_buffer);
         //let response = Self::response_maker(HttpStatus::IAmATeapot, "Hello, World!");
         let response = action(request);
