@@ -13,5 +13,6 @@ readme = "README.md"
 categories = ["network-programming", "web-programming"]
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
-
-[dependencies]
+[lib]
+name = "HTeaPot"
+path = "src/hteapot.rs"

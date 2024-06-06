@@ -11,6 +11,8 @@ use std::thread;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
+#[derive(Eq)]
+#[derive(Hash)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -23,9 +25,8 @@ pub enum HttpMethod {
     CONNECT,
 }
 
-
 impl HttpMethod {
-    fn from_str(method: &str) -> HttpMethod {
+    pub fn from_str(method: &str) -> HttpMethod {
         match method {
             "GET" => HttpMethod::GET,
             "POST" => HttpMethod::POST,
@@ -39,7 +40,7 @@ impl HttpMethod {
             _ => panic!("Invalid HTTP method"),
         }
     }
-    fn to_str(&self) -> &str {
+    pub fn to_str(&self) -> &str {
         match self {
             HttpMethod::GET => "GET",
             HttpMethod::POST => "POST",
@@ -284,7 +285,7 @@ impl HteaPot {
             request_buffer.push_str(&partial_request_buffer);
             if *buffer.last().unwrap() == 0 {break;}
         }
-        
+
         let request = Self::request_parser(&request_buffer);
         //let response = Self::response_maker(HttpStatus::IAmATeapot, "Hello, World!");
         let response = action(request);
