@@ -1,17 +1,17 @@
 // Written by Alberto Ruiz 2024-04-08
 // This is the HTTP client module, it will handle the requests and responses
 
-use std::{fs, io::{Read, Write}, net::TcpStream};
+use std::{io::{Read, Write}, net::TcpStream};
 
 
-struct url {
+struct Url {
   scheme: String,
   domain: String,
   port: String
 }
 
 
-fn parse_url(url: &str) -> Result<url,&str> {
+fn parse_url(url: &str) -> Result<Url,&str> {
   let url_parts = url.split(":").collect::<Vec<&str>>();
   let prefix = url_parts[0];
   let domain = url_parts[1].trim_start_matches("//");
@@ -24,7 +24,7 @@ fn parse_url(url: &str) -> Result<url,&str> {
       _ => "80"
     }
   };
-  Ok(url {
+  Ok(Url {
     scheme: prefix.to_string(),
     domain: domain.to_string(),
     port: port.to_string()
@@ -35,6 +35,9 @@ pub fn fetch(url: &str) -> Result<String,&str> {
   let url = parse_url(url);
   if url.is_err() { return Err("Error parsing url")}
   let url = url.unwrap();
+  if url.scheme == "https" {
+    return Err("not supported yet");
+  }
   let client = TcpStream::connect(format!("{}:{}",url.domain,url.port));
   if client.is_err() {
     return Err("Error fetching");

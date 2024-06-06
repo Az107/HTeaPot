@@ -1,8 +1,10 @@
 [package]
-name = "HTeaPot"
+name = "hteapot"
 version = "0.1.0"
 exclude = [
-  "hteapot.toml"
+  "hteapot.toml",
+  "public/",
+  "readme.md"
 ]
 license = "MIT"
 keywords = ["HTTP", "HTTP-SERVER"]
@@ -14,5 +16,5 @@ categories = ["network-programming", "web-programming"]
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
 [lib]
-name = "HTeaPot"
+name = "hteapot"
 path = "src/hteapot.rs"

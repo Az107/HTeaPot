@@ -1,24 +1,26 @@
-mod hteapot;
+pub mod hteapot;
 mod config;
 mod brew;
 
+
 use std::fs;
 
-use hteapot::HteaPot;
+use hteapot::Hteapot;
+use hteapot::HttpStatus;
 use brew::fetch;
 
-use crate::hteapot::HttpStatus;
+
 
 
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
     let config = if args.len() > 1 {
-        config::config::load_config(&args[1])
+        config::Config::load_config(&args[1])
     } else {
-        config::config::new_default()
+        config::Config::new_default()
     };
-    let server = HteaPot::new(config.host.as_str(), config.port);
+    let server = Hteapot::new(config.host.as_str(), config.port);
     println!("Server started at http://{}:{}", config.host, config.port);
     server.listen(move |req| {
         println!("Request: {:?}", req.path);
@@ -29,15 +31,15 @@ fn main() {
         } else {
             req.path.clone()
         };
-        if config.proxyRules.contains_key(&req.path) {
-            println!("Proxying to: {}", config.proxyRules.get(&req.path).unwrap());
-            let url = config.proxyRules.get(&req.path).unwrap();
+        if config.proxy_rules.contains_key(&req.path) {
+            println!("Proxying to: {}", config.proxy_rules.get(&req.path).unwrap());
+            let url = config.proxy_rules.get(&req.path).unwrap();
             return match fetch(url) {
                 Ok(response) => {
                     response
                 },
                 Err(err) => {
-                    HteaPot::response_maker(HttpStatus::InternalServerError, err, None)
+                    Hteapot::response_maker(HttpStatus::InternalServerError, err, None)
                 }
             }
         }
@@ -45,10 +47,10 @@ fn main() {
         let content = fs::read_to_string(path);
         match content {
             Ok(content) => {
-                return HteaPot::response_maker(HttpStatus::OK, &content, None);
+                return Hteapot::response_maker(HttpStatus::OK, &content, None);
             },
             Err(_) => {
-                return HteaPot::response_maker(HttpStatus::NotFound, "<h1> 404 Not Found </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
+                return Hteapot::response_maker(HttpStatus::NotFound, "<h1> 404 Not Found </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
             }
         }
     });
