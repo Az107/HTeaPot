@@ -47,55 +47,55 @@ pub fn toml_parser(content: &str) -> HashMap<String,HashMap<String,String>> {
 }
 
 
-pub struct config {
+pub struct Config {
     pub port: u16, // Port number to listen
     pub host: String, // Host name or IP
     pub root: String, // Root directory to serve files
     pub index: String, // Index file to serve by default
     pub error: String, // Error file to serve when a file is not found
-    pub proxyRules: HashMap<String, String>
+    pub proxy_rules: HashMap<String, String>
 }
 
-impl config {
-    pub fn new(port: u16, host: String, root: String, index: String, error: String) -> config {
-        config {
-          port: port,
-          host: host,
-          root: root,
-          index: index,
-          error: error,
-          proxyRules: HashMap::new()
-        }
-      }
+impl Config {
+    // pub fn new(port: u16, host: String, root: String, index: String, error: String) -> Config {
+    //     Config {
+    //       port: port,
+    //       host: host,
+    //       root: root,
+    //       index: index,
+    //       error: error,
+    //       proxy_rules: HashMap::new()
+    //     }
+    //   }
 
-    pub fn new_default() -> config {
-        config {
+    pub fn new_default() -> Config {
+        Config {
             port: 8080,
             host: "localhost".to_string(),
             root: "./".to_string(),
             index: "index.html".to_string(),
             error: "error.html".to_string(),
-            proxyRules: HashMap::new()
+            proxy_rules: HashMap::new()
         }
     }
 
-    pub fn load_config(path: &str) -> config {
+    pub fn load_config(path: &str) -> Config {
       let content = fs::read_to_string(path);
       if content.is_err() {
-          return config::new_default();
+          return Config::new_default();
       }
       let content = content.unwrap();
       let map = toml_parser(&content);
       println!("{:?}", map);
       let proxy_rules = map.get("proxy").unwrap_or(&HashMap::new()).clone();
       let map = map.get("HTEAPOT").unwrap();
-      config {
+      Config {
           port: map.get("port").unwrap_or(&"8080".to_string()).parse::<u16>().unwrap(),
           host: map.get("host").unwrap_or(&"".to_string()).to_string(),
           root: map.get("root").unwrap_or(&"./".to_string()).to_string(),
           index: map.get("index").unwrap_or(&"index.html".to_string()).to_string(),
           error: map.get("error").unwrap_or(&"error.html".to_string()).to_string(),
-          proxyRules: proxy_rules
+          proxy_rules
       }
     }
 }

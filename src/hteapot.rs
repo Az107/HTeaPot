@@ -2,12 +2,12 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
-
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
+
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -145,18 +145,18 @@ pub struct HttpRequest {
 }
 
 
-pub struct HteaPot {
+pub struct Hteapot {
     port: u16,
     address: String,
     // this will store a map from path to their actions
     // path_table: HashMap<HttpMethod, HashMap<String, HashMap<HttpMethod, fn(HttpRequest) -> String>>>,
 }
 
-impl HteaPot {
+impl Hteapot {
 
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
-        HteaPot {
+        Hteapot {
             port: port,
             address: address.to_string(),
             // path_table: HashMap::new(),
@@ -180,7 +180,7 @@ impl HteaPot {
                  Ok(stream) => {
                     let action_clone = action_clone.clone();
                     thread::spawn(move || {
-                        HteaPot::handle_client(stream, |req| {
+                        Hteapot::handle_client(stream, |req| {
                             action_clone(req)
                         });
                     });
@@ -306,7 +306,7 @@ impl HteaPot {
 #[test]
 fn test_http_parser() {
     let request = "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
-    let parsed_request = HteaPot::request_parser(request);
+    let parsed_request = Hteapot::request_parser(request);
     assert_eq!(parsed_request.method, HttpMethod::GET);
     assert_eq!(parsed_request.path, "/");
     assert_eq!(parsed_request.args.len(), 0);
@@ -316,7 +316,7 @@ fn test_http_parser() {
 
 #[test]
 fn test_http_response_maker() {
-    let response = HteaPot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
+    let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
     let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!";
     assert_eq!(response, expected_response);
 }
