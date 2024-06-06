@@ -5,22 +5,44 @@
 use std::{collections::HashMap, fs};
 
 
-pub fn toml_parser(content: &str) -> HashMap<String,String> {
+pub fn toml_parser(content: &str) -> HashMap<String,HashMap<String,String>> {
     let mut map = HashMap::new();
+    let mut submap = HashMap::new();
+    let mut title = "".to_string();
     let lines = content.split("\n");
     for line in lines {
-        if line.starts_with("#") || line.starts_with("[")  || line.is_empty() {
+        if line.starts_with("#")  || line.is_empty() {
+            continue;
+        }
+        let line = if line.contains('#') {
+            let parts = line.split("#").collect::<Vec<&str>>();
+            parts[0].trim()
+        } else {
+            line.trim()
+        };
+        if line.starts_with("[") && line.ends_with("]") {
+            let key = line.trim_matches('[').trim_matches(']').trim();
+            if submap.len() != 0 && title.len() != 0 {
+                map.insert(title.clone(), submap.clone());
+            } 
+            title = key.to_string();
+            submap = HashMap::new();
             continue;
         }
         let parts = line.split("=").collect::<Vec<&str>>();
-        let key = parts[0].trim();
-        if key.is_empty() || key.contains('#'){
+        if parts.len() != 2 {
             continue;
         }
-        let value = parts[1].trim().split("#").collect::<Vec<&str>>()[0].trim();
-        let value = value.trim_matches('"');
-        map.insert(key.to_string(), value.to_string());
+        let key = parts[0].trim().trim_end_matches('"').trim_start_matches('"');
+        println!("{}",key);
+        if key.is_empty(){
+            continue;
+        }
+        let value = parts[1].trim();
+        let value = value.trim_matches('"').trim();
+        submap.insert(key.to_string(), value.to_string());
     }
+    map.insert(title, submap.clone());
     map
 }
 
@@ -31,6 +53,7 @@ pub struct config {
     pub root: String, // Root directory to serve files
     pub index: String, // Index file to serve by default
     pub error: String, // Error file to serve when a file is not found
+    pub proxyRules: HashMap<String, String>
 }
 
 impl config {
@@ -40,17 +63,19 @@ impl config {
           host: host,
           root: root,
           index: index,
-          error: error
+          error: error,
+          proxyRules: HashMap::new()
         }
       }
 
     pub fn new_default() -> config {
         config {
             port: 8080,
-            host: "".to_string(),
+            host: "localhost".to_string(),
             root: "./".to_string(),
             index: "index.html".to_string(),
             error: "error.html".to_string(),
+            proxyRules: HashMap::new()
         }
     }
 
@@ -61,13 +86,16 @@ impl config {
       }
       let content = content.unwrap();
       let map = toml_parser(&content);
-      
+      println!("{:?}", map);
+      let proxy_rules = map.get("proxy").unwrap_or(&HashMap::new()).clone();
+      let map = map.get("HTEAPOT").unwrap();
       config {
           port: map.get("port").unwrap_or(&"8080".to_string()).parse::<u16>().unwrap(),
           host: map.get("host").unwrap_or(&"".to_string()).to_string(),
           root: map.get("root").unwrap_or(&"./".to_string()).to_string(),
           index: map.get("index").unwrap_or(&"index.html".to_string()).to_string(),
           error: map.get("error").unwrap_or(&"error.html".to_string()).to_string(),
+          proxyRules: proxy_rules
       }
     }
 }
