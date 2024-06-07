@@ -18,3 +18,8 @@ authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 [lib]
 name = "hteapot"
 path = "src/hteapot.rs"
+
+[[bin]]
+name = "hteapot"
+
+

@@ -212,12 +212,24 @@ impl Hteapot {
     }
 
     // Parse the request
-    pub fn request_parser(request: &str) -> HttpRequest {
+    pub fn request_parser(request: &str) -> Result<HttpRequest,&str> {
         let mut lines = request.lines();
-        let first_line = lines.next().unwrap();
+        let first_line = lines.next();
+        if first_line.is_none() {
+            return Err("Error parsng request");
+        }
+        let first_line = first_line.unwrap();
         let mut words = first_line.split_whitespace();
-        let method = words.next().unwrap();
-        let mut path = words.next().unwrap().to_string();
+        let method = words.next();
+        if method.is_none() {
+            return Err("Error parsng request");
+        }
+        let method = method.unwrap();
+        let path = words.next();
+        if path.is_none() {
+            return Err("Error parsng request");
+        }
+        let mut path = path.unwrap().to_string();
         let mut headers: HashMap<String, String> = HashMap::new();
         loop {
             let line = lines.next().unwrap();
@@ -265,13 +277,13 @@ impl Hteapot {
             }
         }
 
-        HttpRequest {
+        Ok(HttpRequest {
             method: HttpMethod::from_str(method),
             path: path.to_string(),
             args: args,
             headers: headers,
             body: body.trim_end().to_string(),
-        }
+        })
     }
 
     // Handle the client when a request is received
@@ -287,6 +299,11 @@ impl Hteapot {
         }
 
         let request = Self::request_parser(&request_buffer);
+        if request.is_err() {
+            eprintln!("{}", request.err().unwrap());
+            return;
+        }
+        let request = request.unwrap();
         //let response = Self::response_maker(HttpStatus::IAmATeapot, "Hello, World!");
         let response = action(request);
         let r = stream.write(response.as_bytes()); 
@@ -306,7 +323,7 @@ impl Hteapot {
 #[test]
 fn test_http_parser() {
     let request = "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
-    let parsed_request = Hteapot::request_parser(request);
+    let parsed_request = Hteapot::request_parser(request).unwrap();
     assert_eq!(parsed_request.method, HttpMethod::GET);
     assert_eq!(parsed_request.path, "/");
     assert_eq!(parsed_request.args.len(), 0);
