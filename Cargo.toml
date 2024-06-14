@@ -11,7 +11,7 @@ keywords = ["HTTP", "HTTP-SERVER"]
 description = "HTeaPot is a lightweight HTTP server library designed to be easy to use and extend."
 homepage = "https://github.com/az107/HTeaPot"
 repository = "https://github.com/az107/HTeaPot"
-readme = "README.md"
+readme = "readme.md"
 categories = ["network-programming", "web-programming"]
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
