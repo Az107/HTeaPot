@@ -4,9 +4,10 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::net::{TcpListener, TcpStream};
-use std::{clone, str};
+use std::{str, thread};
+use std::sync::Arc;
 
 
 #[derive(Debug)]
@@ -166,7 +167,7 @@ impl Hteapot {
     }
 
     // Start the server
-    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> String ){
+    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -174,15 +175,17 @@ impl Hteapot {
             Err(e) => {
                 eprintln!("Error: {}", e);
                 return;
-            }
-        };
-        //let action_clone = Arc::new(action);
-        for stream in listener.incoming() {
-            match stream {
-                 Ok(stream) => {
-                     self.handle_client(stream, |req| {
-                         action(req)
-                      });
+                }
+                };
+                //let action_clone = Arc::new(action);
+                for stream in listener.incoming() {
+                    match stream {
+                    Ok(stream) => {
+                        //let action_clone = action_clone.clone();
+                        Hteapot::handle_client(stream, |req| {
+                            action(req)
+                        });
+            
                 }
                 Err(e) => {
                     println!("Error: {}", e);
@@ -210,27 +213,29 @@ impl Hteapot {
     }
 
     // Parse the request
-    pub fn request_parser(request: &str) -> Result<HttpRequest,&str> {
+    pub fn request_parser(request: String) -> Result<HttpRequest, String> {
         let mut lines = request.lines();
         let first_line = lines.next();
         if first_line.is_none() {
-            return Err("Error parsng request");
+            return Err("Error parsng request".to_string());
         }
         let first_line = first_line.unwrap();
         let mut words = first_line.split_whitespace();
         let method = words.next();
         if method.is_none() {
-            return Err("Error parsng request");
+            return Err("Error parsng request".to_string());
         }
         let method = method.unwrap();
         let path = words.next();
         if path.is_none() {
-            return Err("Error parsng request");
+            return Err("Error parsng request".to_string());
         }
         let mut path = path.unwrap().to_string();
         let mut headers: HashMap<String, String> = HashMap::new();
         loop {
-            let line = lines.next().unwrap();
+            let line = lines.next();
+            if line.is_none() {break;}
+            let line = line.unwrap();
             if line.is_empty() {
                 break;
             }
@@ -281,49 +286,32 @@ impl Hteapot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(&mut self, mut stream: TcpStream , action: impl Fn(HttpRequest) -> String ) {
-        //let mut request_buffer: String = String::new();
-        let mut buffer = [0; 1024];
-        let mut reader = BufReader::new(&stream);
+    fn handle_client(stream: TcpStream , action: impl Fn(HttpRequest) -> String ) {
+        let reader = BufReader::new(&stream);
         let mut writer = BufWriter::new(&stream);
-        let r = reader.read(&mut buffer);
-        let request_buffer = String::from_utf8_lossy(&buffer).to_string();
-        //   loop {
-        //     let mut buffer = [0; 1024];
-        //     stream.read(&mut buffer).unwrap_or_default();
-        //     if buffer[0] == 0 {break};
-        //     let partial_request_buffer = String::from_utf8_lossy(&buffer).to_string();
-        //     request_buffer.push_str(&partial_request_buffer);
-        //     if *buffer.last().unwrap() == 0 {break;}
-        // }
-        //let request_buffer = "GET /index.html HTTP/1.1\n\n\r".to_string();
-        let response = match self.cache.get(&request_buffer) {
-            Some(r) => {
-                r.clone()
-            },
-            None => {
-                let request = Self::request_parser(&request_buffer);
-                if request.is_err() {
-                    eprintln!("{}", request.err().unwrap());
-                    return;
-                }
-                let request = request.unwrap();
+        let lines: Vec<String> = reader.lines()
+        .map(|result| result.unwrap())
+        .take_while(|line| !line.is_empty())
+        .collect();
     
-                let response = action(request);
-                if response.starts_with("HTTP/1.1 2") {
-                    self.cache.insert(request_buffer, response.clone());
+        let request_string = lines.join("\n");
+        
+        let request = Self::request_parser(request_string);
+        if request.is_err() {
+            eprintln!("{}", request.err().unwrap());
+            return;
+            }
+            let request = request.unwrap();
+            
+            let response = action(request);
+            let r = writer.write_all(response.as_bytes());
+            if r.is_err() {
+                eprintln!("Error: {}", r.err().unwrap());
                 }
-                response
-            },
-        };
-        let r = writer.write_all(response.as_bytes());
-        if r.is_err() {
-            eprintln!("Error: {}", r.err().unwrap());
-        }
-        let r = writer.flush();
-        if r.is_err() {
-            eprintln!("Error: {}", r.err().unwrap());
-        }
+                let r = writer.flush();
+                if r.is_err() {
+                    eprintln!("Error: {}", r.err().unwrap());
+                    }
     }
 }
 
@@ -333,7 +321,7 @@ impl Hteapot {
 #[test]
 fn test_http_parser() {
     let request = "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
-    let parsed_request = Hteapot::request_parser(request).unwrap();
+    let parsed_request = Hteapot::request_parser(request.to_string()).unwrap();
     assert_eq!(parsed_request.method, HttpMethod::GET);
     assert_eq!(parsed_request.path, "/");
     assert_eq!(parsed_request.args.len(), 0);
