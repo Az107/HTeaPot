@@ -5,6 +5,7 @@ mod brew;
 
 use std::fs;
 
+use async_std::task;
 use hteapot::Hteapot;
 use hteapot::HttpStatus;
 use brew::fetch;
@@ -22,8 +23,7 @@ fn main() {
     };
     let mut server = Hteapot::new(config.host.as_str(), config.port);
     println!("Server started at http://{}:{}", config.host, config.port);
-    server.listen( move |req| {
-        println!("Request: {:?}", req.path);
+    let fut = server.listen( move |req| {
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();
             path.push_str(&config.index);
@@ -54,4 +54,5 @@ fn main() {
             }
         }
     });
+    task::block_on(fut);
 }

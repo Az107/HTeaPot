@@ -4,15 +4,18 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::net::{TcpListener, TcpStream};
+extern crate async_std;
+use async_std::net::TcpStream;
+use async_std::stream;
+use async_std::{io::{BufRead,BufReader, BufWriter}, prelude::*, task, net::{TcpListener, ToSocketAddrs},};
+//use std::net::{TcpListener, TcpStream};
 use std::{str, thread};
 use std::sync::Arc;
 
 
 #[derive(Debug)]
 #[derive(PartialEq)]
-#[derive(Eq)]
+#[derive(Eq)]   
 #[derive(Hash)]
 pub enum HttpMethod {
     GET,
@@ -167,31 +170,28 @@ impl Hteapot {
     }
 
     // Start the server
-    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ){
+    pub async fn listen(&mut self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
-        let listener = TcpListener::bind(addr);
-        let listener = match listener {
+        let listener = match TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(e) => {
                 eprintln!("Error: {}", e);
                 return;
-                }
-                };
-                //let action_clone = Arc::new(action);
-                for stream in listener.incoming() {
-                    match stream {
-                    Ok(stream) => {
-                        //let action_clone = action_clone.clone();
-                        Hteapot::handle_client(stream, |req| {
-                            action(req)
-                        });
-            
-                }
-                Err(e) => {
-                    println!("Error: {}", e);
-                }
             }
+        }; 
+        let action_clone = Arc::new(action);
+        let mut incoming = listener.incoming();
+        while let Some(stream) = incoming.next().await { 
+            let stream = match stream {
+                Ok(stream) => stream,
+                Err(e) => {
+                    println!("Error: {}",e);
+                    continue;
+                }
+            };
+            let _handle = task::spawn(Hteapot::handle_client(stream, action_clone.clone()));
         }
+        
     }
 
 
@@ -286,32 +286,41 @@ impl Hteapot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(stream: TcpStream , action: impl Fn(HttpRequest) -> String ) {
+    async fn handle_client(stream: TcpStream , action: Arc<impl Fn(HttpRequest) -> String + Send + Sync + '_> ) {
         let reader = BufReader::new(&stream);
         let mut writer = BufWriter::new(&stream);
-        let lines: Vec<String> = reader.lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
-    
-        let request_string = lines.join("\n");
+        let mut lines = reader.lines();
         
+        let mut request_string = String::new();
+        while let Some(line) = lines.next().await {
+            match  line {
+                Ok(line ) => {
+                    if line.is_empty() {break;}
+                    let line = format!("{}\n",line);
+                    request_string.push_str(&line);
+                },
+                Err(e) => {
+                    eprintln!("Error parsing line {}",e);
+                    break;
+                }
+            };
+        }
         let request = Self::request_parser(request_string);
         if request.is_err() {
             eprintln!("{}", request.err().unwrap());
             return;
-            }
-            let request = request.unwrap();
-            
-            let response = action(request);
-            let r = writer.write_all(response.as_bytes());
-            if r.is_err() {
-                eprintln!("Error: {}", r.err().unwrap());
-                }
-                let r = writer.flush();
-                if r.is_err() {
-                    eprintln!("Error: {}", r.err().unwrap());
-                    }
+        }
+        let request = request.unwrap();
+        
+        let response = action(request);
+        let r = writer.write_all(response.as_bytes()).await;
+        if r.is_err() {
+            eprintln!("Error: {}", r.err().unwrap());
+        }
+        let r = writer.flush().await;
+        if r.is_err() {
+            eprintln!("Error: {}", r.err().unwrap());
+        }
     }
 }
 
