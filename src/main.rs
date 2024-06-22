@@ -23,7 +23,7 @@ fn main() {
     };
     let mut server = Hteapot::new(config.host.as_str(), config.port);
     println!("Server started at http://{}:{}", config.host, config.port);
-    let fut = server.listen( move |req| {
+    server.listen( move |req| {
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();
             path.push_str(&config.index);
@@ -54,5 +54,4 @@ fn main() {
             }
         }
     });
-    task::block_on(fut);
 }

@@ -169,8 +169,13 @@ impl Hteapot {
         }
     }
 
+    pub fn listen (&self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ) {
+        let fut = self.async_listen(action);
+        task::block_on(fut);
+    }
+
     // Start the server
-    pub async fn listen(&mut self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ){
+    async fn async_listen(&self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
         let listener = match TcpListener::bind(addr).await {
             Ok(listener) => listener,
