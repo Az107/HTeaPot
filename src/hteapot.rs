@@ -4,10 +4,12 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::thread::sleep;
+use std::time::Duration;
 use std::{str, thread};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 
 #[derive(Debug)]
@@ -150,6 +152,7 @@ pub struct Hteapot {
     port: u16,
     address: String,
     cache: HashMap<String,String>,
+    pool: Arc<Mutex<Vec<TcpStream>>>
     // this will store a map from path to their actions
     // path_table: HashMap<HttpMethod, HashMap<String, HashMap<HttpMethod, fn(HttpRequest) -> String>>>,
 }
@@ -162,6 +165,7 @@ impl Hteapot {
             port: port,
             address: address.to_string(),
             cache: HashMap::new(),
+            pool: Arc::new(Mutex::new(Vec::new())),
             // path_table: HashMap::new(),
         }
     }
@@ -175,23 +179,36 @@ impl Hteapot {
             Err(e) => {
                 eprintln!("Error: {}", e);
                 return;
-                }
-                };
-                //let action_clone = Arc::new(action);
-                for stream in listener.incoming() {
-                    match stream {
-                    Ok(stream) => {
-                        //let action_clone = action_clone.clone();
-                        Hteapot::handle_client(stream, |req| {
-                            action(req)
-                        });
-            
-                }
-                Err(e) => {
-                    println!("Error: {}", e);
-                }
             }
-        }
+        };
+        let arc_action = Arc::new(action);
+        listener.set_nonblocking(true).expect("set_nonblocking call failed");
+        let pool_clone = self.pool.clone();
+        let greeter_loop = thread::spawn(move || {
+            loop {
+                for stream in listener.incoming() {
+                    if stream.is_err() {break;}
+                    let stream = stream.unwrap();
+                    stream.set_nonblocking(true).expect("set_nonblocking call failed");
+                    let mut pool = pool_clone.lock().expect("Error locking pool");
+                    pool.push(stream);
+                }
+                sleep(Duration::from_millis(10));
+            }
+        });
+        let pool_clone = self.pool.clone();
+        thread::spawn(move || {
+            loop {
+                let mut pool = pool_clone.lock().expect("Error locking pool");
+                pool.retain(|stream| {
+                    let action_clone = arc_action.clone();
+                    Hteapot::handle_client(stream, move |request| {
+                        action_clone(request)
+                    })
+                });
+            }
+        });
+        greeter_loop.join();
     }
 
 
@@ -286,32 +303,52 @@ impl Hteapot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(stream: TcpStream , action: impl Fn(HttpRequest) -> String ) {
-        let reader = BufReader::new(&stream);
-        let mut writer = BufWriter::new(&stream);
-        let lines: Vec<String> = reader.lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
-    
-        let request_string = lines.join("\n");
-        
+    fn handle_client(stream: &TcpStream , action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ) -> bool{
+        let mut reader = BufReader::new(stream);
+        let mut writer = BufWriter::new(stream);
+        let mut request_buffer = Vec::new();
+        loop {
+            let mut buffer = [0; 1024];
+            match reader.read(&mut buffer) {
+                Err(e) => {
+                    match e.kind() {
+                        io::ErrorKind::WouldBlock => {
+                            println!("would have blocked");
+                            return false;
+                        },
+                        _ => panic!("Got an error: {}", e),
+                    }
+                },
+                Ok(m) => {
+                    if m == 0 {
+                        break;
+                    }
+                },
+            };
+            request_buffer.append(&mut buffer.to_vec());
+            if buffer[0] == 0 {break};
+            if *buffer.last().unwrap() == 0 {break;}
+        }
+
+
+        let request_string =  String::from_utf8(request_buffer).unwrap();
         let request = Self::request_parser(request_string);
         if request.is_err() {
             eprintln!("{}", request.err().unwrap());
-            return;
-            }
-            let request = request.unwrap();
-            
-            let response = action(request);
-            let r = writer.write_all(response.as_bytes());
-            if r.is_err() {
-                eprintln!("Error: {}", r.err().unwrap());
-                }
-                let r = writer.flush();
-                if r.is_err() {
-                    eprintln!("Error: {}", r.err().unwrap());
-                    }
+            return false;
+        }
+        let request = request.unwrap();
+        
+        let response = action(request);
+        let r = writer.write_all(response.as_bytes());
+        if r.is_err() {
+            eprintln!("Error: {}", r.err().unwrap());
+        }
+        let r = writer.flush();
+        if r.is_err() {
+            eprintln!("Error: {}", r.err().unwrap());
+        }
+        true
     }
 }
 
