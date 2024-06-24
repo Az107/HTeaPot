@@ -190,6 +190,7 @@ impl Hteapot {
                     if stream.is_err() {break;}
                     let stream = stream.unwrap();
                     stream.set_nonblocking(true).expect("set_nonblocking call failed");
+                    stream.set_nodelay(true).expect("set_nodelay call failed");
                     let mut pool = pool_clone.lock().expect("Error locking pool");
                     pool.push(stream);
                 }
@@ -314,9 +315,9 @@ impl Hteapot {
                     match e.kind() {
                         io::ErrorKind::WouldBlock => {
                             println!("would have blocked");
-                            return false;
+                            return true;
                         },
-                        _ => panic!("Got an error: {}", e),
+                        _ => return false,
                     }
                 },
                 Ok(m) => {
