@@ -4,10 +4,8 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::thread::sleep;
-use std::time::Duration;
 use std::{str, thread};
 use std::sync::{Arc, Mutex, Condvar};
 
@@ -151,12 +149,9 @@ pub struct HttpRequest {
 pub struct Hteapot {
     port: u16,
     address: String,
-    cache: HashMap<String,String>,
+    //cache: HashMap<String,String>,
     pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
-    //pool2: Arc<(Mutex<Vec<TcpStream>>, Condvar)>
 
-    // this will store a map from path to their actions
-    // path_table: HashMap<HttpMethod, HashMap<String, HashMap<HttpMethod, fn(HttpRequest) -> String>>>,
 }
 
 impl Hteapot {
@@ -166,11 +161,9 @@ impl Hteapot {
         Hteapot {
             port: port,
             address: address.to_string(),
-            cache: HashMap::new(),
+            //cache: HashMap::new(),
             pool: Arc::new((Mutex::new(Vec::new()), Condvar::new())),
-            //pool2: Arc::new((Mutex::new(Vec::new()), Condvar::new())),
 
-            // path_table: HashMap::new(),
         }
     }
 
@@ -195,12 +188,12 @@ impl Hteapot {
                 let stream = stream.unwrap();
                 let (lock, cvar) = &*pool_clone;
                 let mut pool = lock.lock().expect("Error locking pool");
+                stream.set_nodelay(true).expect("Error set nodelay to stream");
                 pool.push(stream);
                 cvar.notify_one();  // Notify one waiting thread
             }
         });
         let pool_clone = self.pool.clone();
-        //let pool2_clone = self.pool2.clone();
         thread::spawn(move || {
             loop {
                     let (lock, cvar) = &*pool_clone;
@@ -218,25 +211,7 @@ impl Hteapot {
             }
         });
 
-        // let pool2_clone = self.pool2.clone();
-        // thread::spawn(move || {
-        //     loop {
-        //         let (lock, cvar) = &*pool2_clone;
-        //         let mut pool = lock.lock().expect("Error locking pool");
-
-        //         while pool.is_empty() {
-        //             pool = cvar.wait(pool).expect("Error waiting on cvar");
-        //         }
-        //         for stream in pool.iter() {
-        //             let action_clone = arc_action.clone();
-        //             Hteapot::handle_client(stream, move |request| {
-        //                 action_clone(request)
-        //             });
-        //         }
-        //         pool.clear();
-        //     }
-        // });
-        greeter_loop.join();
+        greeter_loop.join().expect("Erroing joining listener loop");
     }
 
 
@@ -332,7 +307,6 @@ impl Hteapot {
 
     // Handle the client when a request is received
     fn handle_client(stream: &TcpStream , action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ) -> bool{
-        stream.set_nodelay(true);
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
         let mut request_buffer = Vec::new();
@@ -351,7 +325,7 @@ impl Hteapot {
                 },
                 Ok(m) => {
                     if m == 0 {
-                        break;
+                        return false;
                     }
                 },
             };
@@ -359,7 +333,6 @@ impl Hteapot {
             if buffer[0] == 0 {break};
             if *buffer.last().unwrap() == 0 {break;}
         }
-
 
         let request_string =  String::from_utf8(request_buffer).unwrap();
         let request = Self::request_parser(request_string);
