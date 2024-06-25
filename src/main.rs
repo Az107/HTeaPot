@@ -24,7 +24,7 @@ fn main() {
     let mut server = Hteapot::new(config.host.as_str(), config.port);
     println!("Server started at http://{}:{}", config.host, config.port);
     server.listen( move |req| {
-        println!("Request: {:?}", req.path);
+        //println!("Request: {:?}", req.path);
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();
             path.push_str(&config.index);
@@ -48,7 +48,7 @@ fn main() {
         let content = fs::read(path);
         match content {
             Ok(content) => {
-                return Hteapot::response_maker(HttpStatus::OK,&content, None);
+                return Hteapot::response_maker(HttpStatus::OK,&content, headers!("Connection" => "close"));
             },
             Err(e) => {
                 match e.kind() {

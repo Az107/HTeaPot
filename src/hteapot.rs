@@ -183,26 +183,39 @@ impl Hteapot {
         let pool_clone = self.pool.clone();
         let greeter_loop = thread::spawn(move || {
             for stream in listener.incoming() {
-
-                if stream.is_err() {continue;}
+                if stream.is_err() {
+                    println!("error stream! {:?}",stream.err());
+                    continue;
+                }
                 let stream = stream.unwrap();
                 let (lock, cvar) = &*pool_clone;
-                let mut pool = lock.lock().expect("Error locking pool");
                 stream.set_nodelay(true).expect("Error set nodelay to stream");
+                println!("waiting");
+                let mut pool = lock.lock().expect("Error locking pool");
+                println!("locked!!");
+
                 pool.push(stream);
                 cvar.notify_one();  // Notify one waiting thread
             }
         });
         let pool_clone = self.pool.clone();
         thread::spawn(move || {
+            let mut streams_to_handle = Vec::new();
             loop {
-                    let (lock, cvar) = &*pool_clone;
-                    let mut pool = lock.lock().expect("Error locking pool");
-
-                    while pool.is_empty() {
-                        pool = cvar.wait(pool).expect("Error waiting on cvar");
+                    {
+                        if streams_to_handle.is_empty() {
+                            let (lock, cvar) = &*pool_clone;
+                            let mut pool = lock.lock().expect("Error locking pool");
+        
+                            while pool.is_empty(){
+                                pool = cvar.wait(pool).expect("Error waiting on cvar");
+                            }
+        
+                            // Movemos los streams fuera del mutex
+                            streams_to_handle.append(&mut *pool);
+                        }
                     }
-                    pool.retain(|stream| {
+                    streams_to_handle.retain(|stream| {
                         let action_clone = arc_action.clone();
                         Hteapot::handle_client(stream, move |request| {
                                     action_clone(request)
@@ -355,7 +368,9 @@ impl Hteapot {
         if r.is_err() {
             eprintln!("Error: {}", r.err().unwrap());
         }
-        true
+
+        let r = reader.read(&mut [0; 1]); 
+        r.is_err()
     }
 }
 
