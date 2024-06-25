@@ -4,6 +4,7 @@ mod brew;
 
 
 use std::fs;
+use std::io;
 
 use hteapot::Hteapot;
 use hteapot::HttpStatus;
@@ -36,21 +37,28 @@ fn main() {
             let url = config.proxy_rules.get(&req.path).unwrap();
             return match fetch(url) {
                 Ok(response) => {
-                    response
+                    response.into()
                 },
                 Err(err) => {
-                    Hteapot::response_maker(HttpStatus::InternalServerError, err, None)
+                    Hteapot::response_maker(HttpStatus::InternalServerError, err.as_bytes(), None)
                 }
             }
         }
         let path = format!("./{}/{}",config.root, path);
-        let content = fs::read_to_string(path);
+        let content = fs::read(path);
         match content {
             Ok(content) => {
-                return Hteapot::response_maker(HttpStatus::OK, &content, None);
+                return Hteapot::response_maker(HttpStatus::OK,&content, None);
             },
-            Err(_) => {
-                return Hteapot::response_maker(HttpStatus::NotFound, "<h1> 404 Not Found </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
+            Err(e) => {
+                match e.kind() {
+                    io::ErrorKind::NotFound => {
+                        return Hteapot::response_maker(HttpStatus::NotFound, "<h1> 404 Not Found </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
+                    },
+                    _ => {
+                        return Hteapot::response_maker(HttpStatus::InternalServerError, "<h1> 500 Internal Server Error </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
+                    }
+                }
             }
         }
     });

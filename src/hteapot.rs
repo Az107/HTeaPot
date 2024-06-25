@@ -168,7 +168,7 @@ impl Hteapot {
     }
 
     // Start the server
-    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ){
+    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -216,7 +216,8 @@ impl Hteapot {
 
 
     // Create a response
-    pub fn response_maker(status: HttpStatus, content: &str, headers: Option<HashMap<String,String>>) -> String {
+    pub fn response_maker<B: AsRef<[u8]>>(status: HttpStatus, content: B, headers: Option<HashMap<String,String>>) -> Vec<u8> {
+        let content = content.as_ref();
         let status_text = status.to_string();
         let mut headers_text = String::new();
         let mut headers = if headers.is_some() {
@@ -228,7 +229,10 @@ impl Hteapot {
         for (key, value) in headers.iter() {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
-        let response = format!("HTTP/1.1 {} {}\r\n{}\r\n{}",status as u16, status_text,headers_text ,content);
+        let response_header = format!("HTTP/1.1 {} {}\r\n{}\r\n",status as u16, status_text,headers_text);
+        let mut response = Vec::new();
+        response.extend_from_slice(response_header.as_bytes());
+        response.extend_from_slice(content);
         response
     }
 
@@ -306,7 +310,7 @@ impl Hteapot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(stream: &TcpStream , action: impl Fn(HttpRequest) -> String + Send + Sync + 'static  ) -> bool{
+    fn handle_client(stream: &TcpStream , action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ) -> bool{
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
         let mut request_buffer = Vec::new();
@@ -343,7 +347,7 @@ impl Hteapot {
         let request = request.unwrap();
         
         let response = action(request);
-        let r = writer.write_all(response.as_bytes());
+        let r = writer.write_all(&response);
         if r.is_err() {
             eprintln!("Error: {}", r.err().unwrap());
         }
@@ -372,6 +376,7 @@ fn test_http_parser() {
 #[test]
 fn test_http_response_maker() {
     let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
+    let response = String::from_utf8(response).unwrap();
     let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!";
     assert_eq!(response, expected_response);
 }
