@@ -190,9 +190,8 @@ impl Hteapot {
                 let stream = stream.unwrap();
                 let (lock, cvar) = &*pool_clone;
                 stream.set_nodelay(true).expect("Error set nodelay to stream");
-                println!("waiting");
                 let mut pool = lock.lock().expect("Error locking pool");
-                println!("locked!!");
+       
 
                 pool.push(stream);
                 cvar.notify_one();  // Notify one waiting thread
