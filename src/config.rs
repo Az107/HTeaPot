@@ -51,6 +51,7 @@ pub struct Config {
     pub port: u16, // Port number to listen
     pub host: String, // Host name or IP
     pub root: String, // Root directory to serve files
+    pub cache: bool,
     pub index: String, // Index file to serve by default
     pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>
@@ -75,6 +76,7 @@ impl Config {
             root: "./".to_string(),
             index: "index.html".to_string(),
             error: "error.html".to_string(),
+            cache: false,
             proxy_rules: HashMap::new()
         }
     }
@@ -93,6 +95,18 @@ impl Config {
           port: map.get("port").unwrap_or(&"8080".to_string()).parse::<u16>().unwrap(),
           host: map.get("host").unwrap_or(&"".to_string()).to_string(),
           root: map.get("root").unwrap_or(&"./".to_string()).to_string(),
+          cache: match map.get("cache") {
+              Some(r) => {
+                if r == "true" {
+                    true
+                } else {
+                    false
+                }
+              },
+              None => {
+                false
+              }
+          },
           index: map.get("index").unwrap_or(&"index.html".to_string()).to_string(),
           error: map.get("error").unwrap_or(&"error.html".to_string()).to_string(),
           proxy_rules
