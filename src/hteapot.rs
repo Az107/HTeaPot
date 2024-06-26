@@ -179,14 +179,14 @@ impl Hteapot {
             }
         };
         let arc_action = Arc::new(action);
-        listener.set_nonblocking(false).expect("set_nonblocking call failed");
-        
         let pool_clone = self.pool.clone();
         thread::spawn(move || {
             let mut streams_to_handle = Vec::new();
             loop {
+                println!("Processing loop begining");
                     {
                         if streams_to_handle.is_empty() {
+                            println!("no streams");
                             let (lock, cvar) = &*pool_clone;
                             let mut pool = lock.lock().expect("Error locking pool");
                             
@@ -199,14 +199,18 @@ impl Hteapot {
                         }
                     }
                     streams_to_handle.retain(|stream| {
+                        println!("Processing stream");
                         let action_clone = arc_action.clone();
                         Hteapot::handle_client(stream, move |request| {
                                     action_clone(request)
                         })
                     });
+                println!("Processing loop end");
+
             }
         });
 
+        listener.set_nonblocking(false).expect("Error set nodelay to listener");
         let pool_clone = self.pool.clone();
         for stream in listener.incoming() {
             println!("new Stream");
@@ -214,15 +218,16 @@ impl Hteapot {
                 println!("error stream! {:?}",stream.err());
                 continue;
             }
-            let stream = stream.unwrap();
+            let mut stream = stream.unwrap();
             println!("Getting lock");
             let (lock, cvar) = &*pool_clone;
-            stream.set_nodelay(true).expect("Error set nodelay to stream");
             let mut pool = lock.lock().expect("Error locking pool");
             println!("Getted!");
 
             pool.push(stream);
-            cvar.notify_one();  // Notify one waiting thread
+            cvar.notify_one(); 
+            println!("Loop end!");
+             // Notify one waiting thread
         }
     }
 
@@ -245,6 +250,8 @@ impl Hteapot {
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
         response.extend_from_slice(content);
+        response.push(0x0D); // Carriage Return
+        response.push(0x0A); // Line Feed
         response
     }
 
@@ -368,8 +375,7 @@ impl Hteapot {
             eprintln!("Error: {}", r.err().unwrap());
         }
 
-        let r = reader.read(&mut [0; 1]); 
-        r.is_err()
+        false
     }
 }
 
