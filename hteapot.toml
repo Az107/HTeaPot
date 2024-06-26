@@ -1,6 +1,6 @@
 [HTEAPOT]
 port = 8081
-host = "localhost" #test de comentario
+host = "0.0.0.0" #test de comentario
 root = "public"
 [proxy]
 "/test" = "https://example.com"
