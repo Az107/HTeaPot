@@ -2,10 +2,13 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::os::fd::AsFd;
+use std::thread::sleep;
+use std::time::Duration;
 use std::{str, thread};
 use std::sync::{Arc, Mutex, Condvar};
 
@@ -150,7 +153,7 @@ pub struct Hteapot {
     port: u16,
     address: String,
     //cache: HashMap<String,String>,
-    pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
+    //pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
 
 }
 
@@ -162,71 +165,76 @@ impl Hteapot {
             port: port,
             address: address.to_string(),
             //cache: HashMap::new(),
-            pool: Arc::new((Mutex::new(Vec::new()), Condvar::new())),
 
         }
     }
 
     // Start the server
-    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
+    pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
             Ok(listener) => listener,
             Err(e) => {
-                eprintln!("Error: {}", e);
+                eprintln!("Error L: {}", e);
                 return;
-            }
+            }   
         };
+        let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
         let arc_action = Arc::new(action);
-        let pool_clone = self.pool.clone();
-        thread::spawn(move || {
-            let mut streams_to_handle = Vec::new();
-            loop {
-                println!("Processing loop begining");
-                    {
-                        if streams_to_handle.is_empty() {
-                            println!("no streams");
+
+
+        for tn in 0..1 {
+            let pool_clone = pool.clone();
+            let action_clone = arc_action.clone();
+            thread::spawn(move || {
+                let mut streams_to_handle = Vec::new();
+                loop {
+                        {
                             let (lock, cvar) = &*pool_clone;
                             let mut pool = lock.lock().expect("Error locking pool");
-                            
-                            while pool.is_empty(){
-                                pool = cvar.wait(pool).expect("Error waiting on cvar");
+                            if  streams_to_handle.is_empty() {
+                                println!("no streams");
+                                pool = cvar.wait_while(pool, |pool| pool.is_empty()).expect("Error waiting on cvar");
+                                println!("New streams!!!");
+                                
                             }
-        
-                            // Movemos los streams fuera del mutex
-                            streams_to_handle.append(&mut *pool);
+                        
+                            if !pool.is_empty() {
+                                streams_to_handle.push(pool.pop_back().unwrap());
+                            } 
+                            
                         }
-                    }
-                    streams_to_handle.retain(|stream| {
-                        println!("Processing stream");
-                        let action_clone = arc_action.clone();
-                        Hteapot::handle_client(stream, move |request| {
-                                    action_clone(request)
-                        })
-                    });
-                println!("Processing loop end");
+                        
+                        streams_to_handle.retain(|mut stream| {
+                            //println!("Handling request by {}", tn);
+                            let action_clone = action_clone.clone();
+                            Hteapot::handle_client(stream, move |request| {
+                                        action_clone(request)
+                            })
+                        });
+                }
+            });
+        }
 
-            }
-        });
-
-        listener.set_nonblocking(false).expect("Error set nodelay to listener");
-        let pool_clone = self.pool.clone();
-        for stream in listener.incoming() {
-            println!("new Stream");
+        let pool_clone = pool.clone();
+        loop {
+            println!("Waiting for connection");
+            let stream = listener.accept();
+            println!("New connection");
             if stream.is_err() {
-                println!("error stream! {:?}",stream.err());
                 continue;
             }
-            let mut stream = stream.unwrap();
-            println!("Getting lock");
-            let (lock, cvar) = &*pool_clone;
-            let mut pool = lock.lock().expect("Error locking pool");
-            println!("Getted!");
-
-            pool.push(stream);
-            cvar.notify_one(); 
-            println!("Loop end!");
+            let  (stream, _) = stream.unwrap();
+            stream.set_nonblocking(true).expect("Error seting non blocking");
+            stream.set_nodelay(true).expect("Error seting no delay");
+            {
+                let (lock, cvar) = &*pool_clone;
+                let mut pool = lock.lock().expect("Error locking pool");
+                
+                pool.push_front(stream);
+                cvar.notify_one(); 
+            }
              // Notify one waiting thread
         }
     }
@@ -342,13 +350,14 @@ impl Hteapot {
                             return true;
                         },
                         _ => {
+                            println!("{:?}",e);
                             return false;
                         },
                     }
                 },
                 Ok(m) => {
                     if m == 0 {
-                        return false;
+                        break;
                     }
                 },
             };
@@ -358,23 +367,23 @@ impl Hteapot {
         }
 
         let request_string =  String::from_utf8(request_buffer).unwrap();
+        // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {
             eprintln!("{}", request.err().unwrap());
             return false;
         }
         let request = request.unwrap();
-        
         let response = action(request);
         let r = writer.write_all(&response);
         if r.is_err() {
-            eprintln!("Error: {}", r.err().unwrap());
+            eprintln!("Error1: {}", r.err().unwrap());
         }
         let r = writer.flush();
         if r.is_err() {
-            eprintln!("Error: {}", r.err().unwrap());
+            eprintln!("Error2: {}", r.err().unwrap());
         }
-
+        let _ = stream.shutdown(Shutdown::Both);
         false
     }
 }
