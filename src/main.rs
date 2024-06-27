@@ -6,7 +6,6 @@ mod brew;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use hteapot::Hteapot;
@@ -22,7 +21,7 @@ fn main() {
         config::Config::new_default()
     };
     let cache: Mutex<HashMap<String, Vec<u8>>> = Mutex::new(HashMap::new());
-    let mut server = Hteapot::new(config.host.as_str(), config.port);
+    let server = Hteapot::new_threaded(config.host.as_str(), config.port,config.threads);
     println!("Server started at http://{}:{}", config.host, config.port);
     server.listen( move |req| {
         //println!("Request: {:?}", req.path);

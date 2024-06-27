@@ -152,6 +152,7 @@ pub struct HttpRequest {
 pub struct Hteapot {
     port: u16,
     address: String,
+    threads: u16,
     //cache: HashMap<String,String>,
     //pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
 
@@ -164,10 +165,23 @@ impl Hteapot {
         Hteapot {
             port: port,
             address: address.to_string(),
+            threads: 1,
             //cache: HashMap::new(),
 
         }
     }
+
+    pub fn new_threaded(address: &str, port: u16, thread: u16) -> Self {
+        Hteapot {
+            port: port,
+            address: address.to_string(),
+            threads: thread,
+            //cache: HashMap::new(),
+
+        }
+    }
+    
+
 
     // Start the server
     pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
@@ -184,7 +198,7 @@ impl Hteapot {
         let arc_action = Arc::new(action);
 
 
-        for tn in 0..1 {
+        for tn in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
             thread::spawn(move || {
@@ -194,9 +208,7 @@ impl Hteapot {
                             let (lock, cvar) = &*pool_clone;
                             let mut pool = lock.lock().expect("Error locking pool");
                             if  streams_to_handle.is_empty() {
-                                println!("no streams");
                                 pool = cvar.wait_while(pool, |pool| pool.is_empty()).expect("Error waiting on cvar");
-                                println!("New streams!!!");
                                 
                             }
                         
@@ -206,7 +218,7 @@ impl Hteapot {
                             
                         }
                         
-                        streams_to_handle.retain(|mut stream| {
+                        streams_to_handle.retain(|stream| {
                             //println!("Handling request by {}", tn);
                             let action_clone = action_clone.clone();
                             Hteapot::handle_client(stream, move |request| {
@@ -219,9 +231,7 @@ impl Hteapot {
 
         let pool_clone = pool.clone();
         loop {
-            println!("Waiting for connection");
             let stream = listener.accept();
-            println!("New connection");
             if stream.is_err() {
                 continue;
             }
