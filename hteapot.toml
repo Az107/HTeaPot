@@ -2,6 +2,8 @@
 port = 8081
 host = "0.0.0.0" #test de comentario
 root = "public"
+threads = 5
+cache = true
 [proxy]
 "/test" = "https://example.com"
 "/google" = "http://google.com"
