@@ -1,3 +1,4 @@
+mod logger;
 pub mod hteapot;
 mod config;
 mod brew;
@@ -7,10 +8,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::sync::Mutex;
+use std::time;
+use std::time::SystemTime;
 
 use hteapot::Hteapot;
 use hteapot::HttpStatus;
 use brew::fetch;
+use logger::Logger;
 
 
 fn main() {
@@ -20,11 +24,13 @@ fn main() {
     } else {
         config::Config::new_default()
     };
-    let cache: Mutex<HashMap<String, Vec<u8>>> = Mutex::new(HashMap::new());
+    let mut logger = Logger::new(io::stdout());
+    let cache: Mutex<HashMap<String, (Vec<u8>, u64)>> = Mutex::new(HashMap::new());
     let server = Hteapot::new_threaded(config.host.as_str(), config.port,config.threads);
-    println!("Server started at http://{}:{}", config.host, config.port);
+    logger.msg(format!("Server started at http://{}:{}", config.host, config.port));
     server.listen( move |req| {
-        //println!("Request: {:?}", req.path);
+        let mut logger = Logger::new(io::stdout());
+        logger.msg(format!("Request {} {}",req.method.to_str(), req.path));
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();
             path.push_str(&config.index);
@@ -33,7 +39,7 @@ fn main() {
             req.path.clone()
         };
         if config.proxy_rules.contains_key(&req.path) {
-            println!("Proxying to: {}", config.proxy_rules.get(&req.path).unwrap());
+            logger.msg(format!("Proxying to: {}", config.proxy_rules.get(&req.path).unwrap()));
             let url = config.proxy_rules.get(&req.path).unwrap();
             return match fetch(url) {
                 Ok(response) => {
@@ -61,7 +67,15 @@ fn main() {
         };
     
         let content: Result<Vec<u8>, _> = if cache_result.is_some() {
-            Ok(cache_result.unwrap())
+            let (content,ttl) = cache_result.unwrap();
+            let now = SystemTime::now();
+            let since_epoch = now.duration_since(time::UNIX_EPOCH).expect("Time went backwards");
+            let secs = since_epoch.as_secs();
+            if secs > ttl {
+                fs::read(&path)
+            } else {
+                Ok(content)
+            }
         } else {
             fs::read(&path)
         };
@@ -72,7 +86,10 @@ fn main() {
                     let cache = cache.lock();
                     if cache.is_ok() {
                         let mut cache = cache.unwrap();
-                        cache.insert(path,content.clone());
+                        let now = SystemTime::now();
+                        let since_epoch = now.duration_since(time::UNIX_EPOCH).expect("Time went backwards");
+                        let secs = since_epoch.as_secs();
+                        cache.insert(path,(content.clone(),secs));
                     }
                     
                 }

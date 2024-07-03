@@ -2,13 +2,12 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
+
+
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::fd::AsFd;
-use std::thread::sleep;
-use std::time::Duration;
 use std::{str, thread};
 use std::sync::{Arc, Mutex, Condvar};
 
@@ -92,7 +91,6 @@ pub enum HttpStatus {
     ServiceUnavailable = 503,
 }
 
-
 impl HttpStatus {
     pub fn from_u16(status: u16) -> HttpStatus {
         match status {
@@ -148,7 +146,6 @@ pub struct HttpRequest {
     pub body: String,
 }
 
-
 pub struct Hteapot {
     port: u16,
     address: String,
@@ -182,7 +179,6 @@ impl Hteapot {
     }
     
 
-
     // Start the server
     pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
@@ -198,7 +194,7 @@ impl Hteapot {
         let arc_action = Arc::new(action);
 
 
-        for tn in 0..self.threads {
+        for _tn in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
             thread::spawn(move || {
@@ -416,7 +412,7 @@ fn test_http_parser() {
 fn test_http_response_maker() {
     let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response).unwrap();
-    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!";
+    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!\r\n";
     assert_eq!(response, expected_response);
 }
 
