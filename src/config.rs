@@ -104,7 +104,8 @@ pub struct Config {
     pub threads: u16,
     pub index: String, // Index file to serve by default
     pub error: String, // Error file to serve when a file is not found
-    pub proxy_rules: HashMap<String, String>
+    pub proxy_rules: HashMap<String, String>,
+    pub cgi_rules: HashMap<String,String>
 }
 
 impl Config {
@@ -129,7 +130,9 @@ impl Config {
             threads: 1,
             cache: false,
             cache_ttl: 0,
-            proxy_rules: HashMap::new()
+            proxy_rules: HashMap::new(),
+            cgi_rules: HashMap::new()
+
         }
     }
 
@@ -141,6 +144,7 @@ impl Config {
       let content = content.unwrap();
       let map = toml_parser(&content);
       let mut proxy_rules: HashMap<String, String> = HashMap::new();
+      let mut cgi_rules : HashMap<String, String> = HashMap::new();
       let proxy_map =  map.get("proxy");
       if proxy_map.is_some() {
         let proxy_map = proxy_map.unwrap();
@@ -154,6 +158,22 @@ impl Config {
             proxy_rules.insert(k.clone(), url);
         }
       }
+      let cgi_map =  map.get("cgi");
+      if cgi_map.is_some() {
+        println!("CGI enabled");
+        let cgi_map = cgi_map.unwrap();
+        for k in cgi_map.keys() {
+            let url = cgi_map.get2(k);
+            if url.is_none() {
+                continue;
+            }
+            let url = url.unwrap();
+            cgi_rules.insert(k.clone(), url);
+        }
+      }
+
+    
+
       
       let map = map.get("HTEAPOT").unwrap();
       Config {
@@ -165,7 +185,8 @@ impl Config {
           cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
           index: map.get2("index").unwrap_or("index.html".to_string()),
           error: map.get2("error").unwrap_or("error.html".to_string()),
-          proxy_rules
+          proxy_rules,
+          cgi_rules
       }
     }
 }

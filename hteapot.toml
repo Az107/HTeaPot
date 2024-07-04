@@ -8,3 +8,5 @@ cache_ttl = 3600
 [proxy]
 "/test" = "https://example.com"
 "/google" = "http://google.com"
+[cgi]
+"sh" = "bash"

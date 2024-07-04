@@ -7,6 +7,7 @@ mod brew;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::process::Command;
 use std::sync::Mutex;
 use std::time;
 use std::time::SystemTime;
@@ -15,6 +16,7 @@ use hteapot::Hteapot;
 use hteapot::HttpStatus;
 use brew::fetch;
 use logger::Logger;
+
 
 
 fn main() {
@@ -86,7 +88,25 @@ fn main() {
                 Ok(content)
             }
         } else {
-            fs::read(&path)
+            let mut result = Vec::new();
+            for (extension, program) in config.cgi_rules.iter() {
+                println!("testing {} against {}",extension,path);
+                if path.ends_with(extension.as_str()) {
+                    println!("that is");
+                    let output = Command::new(program)
+                    .arg(&path)
+                    .output()
+                    .expect("failed to execute process");
+                    
+                    result = output.stdout;
+                    break;
+                }
+            } 
+            if result.is_empty() {
+                fs::read(&path)
+            } else {
+                Ok(result)
+            }
         };
         match content {
             Ok(content) => {
