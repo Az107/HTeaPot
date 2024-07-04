@@ -2,10 +2,12 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
-use std::collections::HashMap;
+
+
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::{str, thread};
 use std::sync::{Arc, Mutex, Condvar};
 
@@ -89,7 +91,6 @@ pub enum HttpStatus {
     ServiceUnavailable = 503,
 }
 
-
 impl HttpStatus {
     pub fn from_u16(status: u16) -> HttpStatus {
         match status {
@@ -145,12 +146,12 @@ pub struct HttpRequest {
     pub body: String,
 }
 
-
 pub struct Hteapot {
     port: u16,
     address: String,
+    threads: u16,
     //cache: HashMap<String,String>,
-    pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
+    //pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
 
 }
 
@@ -161,68 +162,86 @@ impl Hteapot {
         Hteapot {
             port: port,
             address: address.to_string(),
+            threads: 1,
             //cache: HashMap::new(),
-            pool: Arc::new((Mutex::new(Vec::new()), Condvar::new())),
 
         }
     }
 
+    pub fn new_threaded(address: &str, port: u16, thread: u16) -> Self {
+        Hteapot {
+            port: port,
+            address: address.to_string(),
+            threads: thread,
+            //cache: HashMap::new(),
+
+        }
+    }
+    
+
     // Start the server
-    pub fn listen(&mut self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
+    pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
             Ok(listener) => listener,
             Err(e) => {
-                eprintln!("Error: {}", e);
+                eprintln!("Error L: {}", e);
                 return;
-            }
+            }   
         };
+        let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
         let arc_action = Arc::new(action);
-        listener.set_nonblocking(false).expect("set_nonblocking call failed");
-        
-        let pool_clone = self.pool.clone();
-        thread::spawn(move || {
-            let mut streams_to_handle = Vec::new();
-            loop {
-                    {
-                        if streams_to_handle.is_empty() {
+
+
+        for _tn in 0..self.threads {
+            let pool_clone = pool.clone();
+            let action_clone = arc_action.clone();
+            thread::spawn(move || {
+                let mut streams_to_handle = Vec::new();
+                loop {
+                        {
                             let (lock, cvar) = &*pool_clone;
                             let mut pool = lock.lock().expect("Error locking pool");
-                            
-                            while pool.is_empty(){
-                                pool = cvar.wait(pool).expect("Error waiting on cvar");
+                            if  streams_to_handle.is_empty() {
+                                pool = cvar.wait_while(pool, |pool| pool.is_empty()).expect("Error waiting on cvar");
+                                
                             }
-        
-                            // Movemos los streams fuera del mutex
-                            streams_to_handle.append(&mut *pool);
+                        
+                            if !pool.is_empty() {
+                                streams_to_handle.push(pool.pop_back().unwrap());
+                            } 
+                            
                         }
-                    }
-                    streams_to_handle.retain(|stream| {
-                        let action_clone = arc_action.clone();
-                        Hteapot::handle_client(stream, move |request| {
-                                    action_clone(request)
-                        })
-                    });
-            }
-        });
+                        
+                        streams_to_handle.retain(|stream| {
+                            //println!("Handling request by {}", tn);
+                            let action_clone = action_clone.clone();
+                            Hteapot::handle_client(stream, move |request| {
+                                        action_clone(request)
+                            })
+                        });
+                }
+            });
+        }
 
-        let pool_clone = self.pool.clone();
-        for stream in listener.incoming() {
-            println!("new Stream");
+        let pool_clone = pool.clone();
+        loop {
+            let stream = listener.accept();
             if stream.is_err() {
-                println!("error stream! {:?}",stream.err());
                 continue;
             }
-            let stream = stream.unwrap();
-            println!("Getting lock");
-            let (lock, cvar) = &*pool_clone;
-            stream.set_nodelay(true).expect("Error set nodelay to stream");
-            let mut pool = lock.lock().expect("Error locking pool");
-            println!("Getted!");
-
-            pool.push(stream);
-            cvar.notify_one();  // Notify one waiting thread
+            let  (stream, _) = stream.unwrap();
+            stream.set_nonblocking(true).expect("Error seting non blocking");
+            stream.set_nodelay(true).expect("Error seting no delay");
+            {
+                let (lock, cvar) = &*pool_clone;
+                let mut pool = lock.lock().expect("Error locking pool");
+                
+                pool.push_front(stream);
+                cvar.notify_one(); 
+            }
+             // Notify one waiting thread
         }
     }
 
@@ -245,6 +264,8 @@ impl Hteapot {
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
         response.extend_from_slice(content);
+        response.push(0x0D); // Carriage Return
+        response.push(0x0A); // Line Feed
         response
     }
 
@@ -335,13 +356,14 @@ impl Hteapot {
                             return true;
                         },
                         _ => {
+                            println!("{:?}",e);
                             return false;
                         },
                     }
                 },
                 Ok(m) => {
                     if m == 0 {
-                        return false;
+                        break;
                     }
                 },
             };
@@ -351,25 +373,24 @@ impl Hteapot {
         }
 
         let request_string =  String::from_utf8(request_buffer).unwrap();
+        // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {
             eprintln!("{}", request.err().unwrap());
             return false;
         }
         let request = request.unwrap();
-        
         let response = action(request);
         let r = writer.write_all(&response);
         if r.is_err() {
-            eprintln!("Error: {}", r.err().unwrap());
+            eprintln!("Error1: {}", r.err().unwrap());
         }
         let r = writer.flush();
         if r.is_err() {
-            eprintln!("Error: {}", r.err().unwrap());
+            eprintln!("Error2: {}", r.err().unwrap());
         }
-
-        let r = reader.read(&mut [0; 1]); 
-        r.is_err()
+        let _ = stream.shutdown(Shutdown::Both);
+        false
     }
 }
 
@@ -391,7 +412,7 @@ fn test_http_parser() {
 fn test_http_response_maker() {
     let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response).unwrap();
-    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!";
+    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!\r\n";
     assert_eq!(response, expected_response);
 }
 
