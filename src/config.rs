@@ -162,7 +162,7 @@ impl Config {
           root: map.get2("root").unwrap_or("./".to_string()),
           threads: map.get2("threads").unwrap_or(1),
           cache: map.get2("cache").unwrap_or(false),
-          cache_ttl: map.get2("cache_ttl").unwrap_or(0),
+          cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
           index: map.get2("index").unwrap_or("index.html".to_string()),
           error: map.get2("error").unwrap_or("error.html".to_string()),
           proxy_rules
