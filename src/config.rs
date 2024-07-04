@@ -2,7 +2,7 @@
 // This is the config module, it will load the configuration
 // file and provide the settings
 
-use std::{any::{Any, TypeId}, clone, collections::HashMap, fs};
+use std::{any::Any, collections::HashMap, fs};
 
 #[derive(Clone)]
 #[derive(Debug)]
@@ -64,7 +64,6 @@ pub fn toml_parser(content: &str) -> HashMap<String,TOMLSchema> {
             continue;
         }
         let key = parts[0].trim().trim_end_matches('"').trim_start_matches('"');
-        println!("{}",key);
         if key.is_empty(){
             continue;
         }
@@ -101,7 +100,7 @@ pub struct Config {
     pub host: String, // Host name or IP
     pub root: String, // Root directory to serve files
     pub cache: bool,
-    pub cache_ttl: i64,
+    pub cache_ttl: u64,
     pub threads: u16,
     pub index: String, // Index file to serve by default
     pub error: String, // Error file to serve when a file is not found
@@ -145,11 +144,13 @@ impl Config {
       let proxy_map =  map.get("proxy");
       if proxy_map.is_some() {
         let proxy_map = proxy_map.unwrap();
-        for k in map.keys() {
+        for k in proxy_map.keys() {
             let url = proxy_map.get2(k);
-            if url.is_none() {continue;}
+            if url.is_none() {
+                println!();
+                continue;
+            }
             let url = url.unwrap();
-            println!("Added proxy {} => {}",k, url);
             proxy_rules.insert(k.clone(), url);
         }
       }

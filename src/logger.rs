@@ -62,21 +62,30 @@ impl SimpleTime {
 
 
 
-pub struct Logger<W: ?Sized + Write> {
-  buffer: BufWriter<W>,
+
+pub struct Logger<W: Sized + Write> {
+  buffers: Vec<BufWriter<W>>,
 }
 
 impl<W: Write> Logger<W> {
   pub fn new(writer: W) -> Logger<W> {
+    let mut buffers = Vec::new();
+    buffers.push(BufWriter::new(writer));
     Logger {
-      buffer: BufWriter::new(writer)
+      buffers: buffers,
     }
   }
 
   fn log(&mut self, content: String) {
-    let _ = self.buffer.write(content.as_bytes());
-    let _ = self.buffer.flush();
+    for b in self.buffers.iter_mut() {
+      let _ = b.write(content.as_bytes());
+      let _ = b.flush();
+    };
+
   } 
+  pub fn add(&mut self, writer: W) {
+    self.buffers.push(BufWriter::new(writer));
+  }
 
   pub fn msg(&mut self, content: String) {
     self.log(format!("[{}] - {}\n",SimpleTime::get_current_timestamp() ,content));
