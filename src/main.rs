@@ -1,23 +1,25 @@
-mod logger;
-pub mod hteapot;
-mod config;
 mod brew;
-
+mod config;
+pub mod hteapot;
+mod logger;
 
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::io::Error;
+use std::net::TcpListener;
+use std::net::TcpStream;
+use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time;
 use std::time::SystemTime;
 
+use brew::fetch;
 use hteapot::Hteapot;
 use hteapot::HttpStatus;
-use brew::fetch;
 use logger::Logger;
-
-
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
@@ -26,17 +28,27 @@ fn main() {
     } else {
         config::Config::new_default()
     };
-    let logger = Mutex::new(Logger::new(io::stdout()));
+    let logger = Arc::new(Mutex::new(Logger::new(vec![Box::new(io::stdout())])));
     let cache: Mutex<HashMap<String, (Vec<u8>, u64)>> = Mutex::new(HashMap::new());
-    let server = Hteapot::new_threaded(config.host.as_str(), config.port,config.threads);
-    logger.lock().expect("this doesnt work :C").msg(format!("Server started at http://{}:{}", config.host, config.port));
+    let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+    logger.lock().expect("this doesnt work :C").msg(format!(
+        "Server started at http://{}:{}",
+        config.host, config.port
+    ));
     if config.cache {
-        logger.lock().expect("this doesnt work :C").msg("Cache Enabled".to_string());
+        logger
+            .lock()
+            .expect("this doesnt work :C")
+            .msg("Cache Enabled".to_string());
     }
 
-    server.listen( move |req| {
+    server.listen(move |req| {
         //let mut logger = Logger::new(io::stdout());
-        logger.lock().expect("this doesnt work :C").msg(format!("Request {} {}",req.method.to_str(), req.path));
+        logger.lock().expect("this doesnt work :C").msg(format!(
+            "Request {} {}",
+            req.method.to_str(),
+            req.path
+        ));
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();
             path.push_str(&config.index);
@@ -45,30 +57,30 @@ fn main() {
             req.path.clone()
         };
         if config.proxy_rules.contains_key(&req.path) {
-            logger.lock().expect("this doesnt work :C").msg(format!("Proxying to: {}", config.proxy_rules.get(&req.path).unwrap()));
+            logger.lock().expect("this doesnt work :C").msg(format!(
+                "Proxying to: {}",
+                config.proxy_rules.get(&req.path).unwrap()
+            ));
             let url = config.proxy_rules.get(&req.path).unwrap();
             return match fetch(url) {
-                Ok(response) => {
-                    response.into()
-                },
+                Ok(response) => response.into(),
                 Err(err) => {
                     Hteapot::response_maker(HttpStatus::InternalServerError, err.as_bytes(), None)
                 }
-            }
+            };
         }
-        let path = format!("./{}/{}",config.root, path);
-        let cache_result = 
-        {
+        let path = format!("./{}/{}", config.root, path);
+        let cache_result = {
             if config.cache {
                 let cache = cache.lock();
                 if cache.is_err() {
                     None
-                }else {
+                } else {
                     let cache = cache.unwrap();
                     let r = cache.get(&path);
                     match r {
                         Some(r) => Some(r.clone()),
-                        None => None
+                        None => None,
                     }
                 }
             } else {
@@ -76,10 +88,13 @@ fn main() {
             }
         };
         let mut is_cache = false;
+
         let content: Result<Vec<u8>, _> = if cache_result.is_some() {
-            let (content,ttl) = cache_result.unwrap();
+            let (content, ttl) = cache_result.unwrap();
             let now = SystemTime::now();
-            let since_epoch = now.duration_since(time::UNIX_EPOCH).expect("Time went backwards");
+            let since_epoch = now
+                .duration_since(time::UNIX_EPOCH)
+                .expect("Time went backwards");
             let secs = since_epoch.as_secs();
             if secs > ttl {
                 fs::read(&path)
@@ -88,52 +103,62 @@ fn main() {
                 Ok(content)
             }
         } else {
-            let mut result = Vec::new();
-            for (extension, program) in config.cgi_rules.iter() {
-                println!("testing {} against {}",extension,path);
-                if path.ends_with(extension.as_str()) {
-                    println!("that is");
-                    let output = Command::new(program)
+            let program = config.cgi_rules.get(path.split(".").last().unwrap());
+            if program.is_some() {
+                let program = program.unwrap();
+                logger
+                    .lock()
+                    .expect("error locking")
+                    .msg(format!("Calling {}", program));
+                let output = Command::new(program)
                     .arg(&path)
                     .output()
                     .expect("failed to execute process");
-                    
-                    result = output.stdout;
-                    break;
+                if Path::new(&path).exists() {
+                    Ok(output.stdout)
+                } else {
+                    Err(Error::new(io::ErrorKind::NotFound, "File does not exist"))
                 }
-            } 
-            if result.is_empty() {
-                fs::read(&path)
             } else {
-                Ok(result)
+                fs::read(&path)
             }
         };
         match content {
             Ok(content) => {
-
                 if config.cache {
                     let cache = cache.lock();
                     if cache.is_ok() && is_cache {
                         let mut cache = cache.unwrap();
                         let now = SystemTime::now();
-                        let since_epoch = now.duration_since(time::UNIX_EPOCH).expect("Time went backwards");
+                        let since_epoch = now
+                            .duration_since(time::UNIX_EPOCH)
+                            .expect("Time went backwards");
                         let secs = since_epoch.as_secs() + config.cache_ttl;
-                        cache.insert(path,(content.clone(),secs));
-                    }
-                    
-                }
-                return Hteapot::response_maker(HttpStatus::OK,&content, headers!("Connection" => "close"));
-            },
-            Err(e) => {
-                match e.kind() {
-                    io::ErrorKind::NotFound => {
-                        return Hteapot::response_maker(HttpStatus::NotFound, "<h1> 404 Not Found </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
-                    },
-                    _ => {
-                        return Hteapot::response_maker(HttpStatus::InternalServerError, "<h1> 500 Internal Server Error </h1>", headers!("Content-Type" => "text/html", "Server" => "HteaPot"));
+                        cache.insert(path, (content.clone(), secs));
                     }
                 }
+                return Hteapot::response_maker(
+                    HttpStatus::OK,
+                    &content,
+                    headers!("Connection" => "close"),
+                );
             }
+            Err(e) => match e.kind() {
+                io::ErrorKind::NotFound => {
+                    return Hteapot::response_maker(
+                        HttpStatus::NotFound,
+                        "<h1> 404 Not Found </h1>",
+                        headers!("Content-Type" => "text/html", "Server" => "HteaPot"),
+                    );
+                }
+                _ => {
+                    return Hteapot::response_maker(
+                        HttpStatus::InternalServerError,
+                        "<h1> 500 Internal Server Error </h1>",
+                        headers!("Content-Type" => "text/html", "Server" => "HteaPot"),
+                    );
+                }
+            },
         }
     });
 }
