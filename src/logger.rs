@@ -1,5 +1,5 @@
 
-use std::time::{self, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::io::{BufWriter, Write};
 
 struct SimpleTime;
@@ -83,9 +83,6 @@ impl<W: Write> Logger<W> {
     };
 
   } 
-  pub fn add(&mut self, writer: W) {
-    self.buffers.push(BufWriter::new(writer));
-  }
 
   pub fn msg(&mut self, content: String) {
     self.log(format!("[{}] - {}\n",SimpleTime::get_current_timestamp() ,content));
