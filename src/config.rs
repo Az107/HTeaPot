@@ -2,10 +2,40 @@
 // This is the config module, it will load the configuration
 // file and provide the settings
 
-use std::{collections::HashMap, fs};
+use std::{any::Any, collections::HashMap, fs};
+
+#[derive(Clone)]
+#[derive(Debug)]
+pub enum TOMLtype {
+    Text(String),
+    Number(u16),
+    Float(f64),
+    Boolean(bool),
+}
+
+type TOMLSchema = HashMap<String,TOMLtype>;
+trait Schema {
+    fn get2<T: 'static + Clone>(&self, key: &str) -> Option<T> ;
+}
 
 
-pub fn toml_parser(content: &str) -> HashMap<String,HashMap<String,String>> {
+impl Schema for  TOMLSchema {
+    fn get2<T: 'static + Clone>(&self, key: &str) -> Option<T> {
+        let value = self.get(key)?;
+        let value = value.clone();
+        let any_value: Box<dyn Any>  = match value {
+            TOMLtype::Text(d)  => Box::new(d),
+            TOMLtype::Number(d)  => Box::new(d),
+            TOMLtype::Float(d) => Box::new(d),
+            TOMLtype::Boolean(d) => Box::new(d)
+        };
+        let r = any_value.downcast_ref::<T>().cloned();
+        if r.is_none() {println!("{} is none", key);}
+        r
+    }
+}
+
+pub fn toml_parser(content: &str) -> HashMap<String,TOMLSchema> {
     let mut map = HashMap::new();
     let mut submap = HashMap::new();
     let mut title = "".to_string();
@@ -34,13 +64,31 @@ pub fn toml_parser(content: &str) -> HashMap<String,HashMap<String,String>> {
             continue;
         }
         let key = parts[0].trim().trim_end_matches('"').trim_start_matches('"');
-        println!("{}",key);
         if key.is_empty(){
             continue;
         }
         let value = parts[1].trim();
-        let value = value.trim_matches('"').trim();
-        submap.insert(key.to_string(), value.to_string());
+        let value = if value.contains('\'') || value.contains('"') {
+            let value = value.trim_matches('"').trim();
+            TOMLtype::Text(value.to_string())
+        } else if value.to_lowercase() == "true" || value.to_lowercase() == "false"  {
+            let value = value.to_lowercase() == "true";
+            TOMLtype::Boolean(value)
+        } else if value.contains('.') {
+            let value = value.parse::<f64>();
+            if value.is_err() {
+                panic!("Error parsing toml");
+            }
+            TOMLtype::Float(value.unwrap())
+        } else {
+            let value = value.parse::<u16>();
+            if value.is_err() {
+                panic!("Error parsing toml");
+            }
+            TOMLtype::Number(value.unwrap())
+
+        };
+        submap.insert(key.to_string(), value);
     }
     map.insert(title, submap.clone());
     map
@@ -51,6 +99,9 @@ pub struct Config {
     pub port: u16, // Port number to listen
     pub host: String, // Host name or IP
     pub root: String, // Root directory to serve files
+    pub cache: bool,
+    pub cache_ttl: u64,
+    pub threads: u16,
     pub index: String, // Index file to serve by default
     pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>
@@ -75,6 +126,9 @@ impl Config {
             root: "./".to_string(),
             index: "index.html".to_string(),
             error: "error.html".to_string(),
+            threads: 1,
+            cache: false,
+            cache_ttl: 0,
             proxy_rules: HashMap::new()
         }
     }
@@ -86,15 +140,31 @@ impl Config {
       }
       let content = content.unwrap();
       let map = toml_parser(&content);
-      println!("{:?}", map);
-      let proxy_rules = map.get("proxy").unwrap_or(&HashMap::new()).clone();
+      let mut proxy_rules: HashMap<String, String> = HashMap::new();
+      let proxy_map =  map.get("proxy");
+      if proxy_map.is_some() {
+        let proxy_map = proxy_map.unwrap();
+        for k in proxy_map.keys() {
+            let url = proxy_map.get2(k);
+            if url.is_none() {
+                println!();
+                continue;
+            }
+            let url = url.unwrap();
+            proxy_rules.insert(k.clone(), url);
+        }
+      }
+      
       let map = map.get("HTEAPOT").unwrap();
       Config {
-          port: map.get("port").unwrap_or(&"8080".to_string()).parse::<u16>().unwrap(),
-          host: map.get("host").unwrap_or(&"".to_string()).to_string(),
-          root: map.get("root").unwrap_or(&"./".to_string()).to_string(),
-          index: map.get("index").unwrap_or(&"index.html".to_string()).to_string(),
-          error: map.get("error").unwrap_or(&"error.html".to_string()).to_string(),
+          port: map.get2("port").unwrap_or(8080),
+          host: map.get2("host").unwrap_or("".to_string()),
+          root: map.get2("root").unwrap_or("./".to_string()),
+          threads: map.get2("threads").unwrap_or(1),
+          cache: map.get2("cache").unwrap_or(false),
+          cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
+          index: map.get2("index").unwrap_or("index.html".to_string()),
+          error: map.get2("error").unwrap_or("error.html".to_string()),
           proxy_rules
       }
     }
