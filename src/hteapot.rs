@@ -8,7 +8,8 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::{str, thread};
+use std::os::macos::raw::stat;
+use std::{str, thread, vec};
 use std::sync::{Arc, Mutex, Condvar};
 
 
@@ -155,6 +156,14 @@ pub struct Hteapot {
 
 }
 
+#[derive(Clone)]
+struct SocketStatus {
+    reading: bool,
+    data_readed: Vec<u8>,
+    data_write: Vec<u8>,
+    index_writed: usize
+}
+
 impl Hteapot {
 
     // Constructor
@@ -191,6 +200,7 @@ impl Hteapot {
             }   
         };
         let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
         let arc_action = Arc::new(action);
 
 
@@ -199,6 +209,7 @@ impl Hteapot {
             let action_clone = arc_action.clone();
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
+                let mut streams_data: HashMap<String, SocketStatus> = HashMap::new();
                 loop {
                         {
                             let (lock, cvar) = &*pool_clone;
@@ -216,10 +227,29 @@ impl Hteapot {
                         
                         streams_to_handle.retain(|stream| {
                             //println!("Handling request by {}", tn);
+                            let local_addr = stream.local_addr().unwrap().to_string();
                             let action_clone = action_clone.clone();
-                            Hteapot::handle_client(stream, move |request| {
+                            let status = match streams_data.get(&local_addr) {
+                                Some(d) => d.clone(),
+                                None => SocketStatus {
+                                    reading: true,
+                                    data_readed: vec![],
+                                    data_write: vec![],
+                                    index_writed: 0,
+                                }
+                            };
+        
+                            let r = Hteapot::handle_client(stream,status, move |request| {
                                         action_clone(request)
-                            })
+                            });
+                            if r.is_some() {
+                                streams_data.insert(local_addr, r.unwrap());
+                                return true;
+                            } else {
+                                streams_data.remove(&local_addr);
+                                return false;
+                            }
+    
                         });
                 }
             });
@@ -343,54 +373,68 @@ impl Hteapot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(stream: &TcpStream , action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ) -> bool{
+    fn handle_client(stream: &TcpStream, socket_status: SocketStatus , action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ) -> Option<SocketStatus>{
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
-        let mut request_buffer = Vec::new();
-        loop {
-            let mut buffer = [0; 1024];
-            match reader.read(&mut buffer) {
-                Err(e) => {
-                    match e.kind() {
-                        io::ErrorKind::WouldBlock => {
-                            return true;
-                        },
-                        _ => {
-                            println!("{:?}",e);
-                            return false;
-                        },
-                    }
-                },
-                Ok(m) => {
-                    if m == 0 {
-                        break;
-                    }
-                },
-            };
-            request_buffer.append(&mut buffer.to_vec());
-            if buffer[0] == 0 {break};
-            if *buffer.last().unwrap() == 0 {break;}
+        let mut socket_status = socket_status.clone();
+        if socket_status.reading {
+            loop {
+                let mut buffer = [0; 1024];
+                match reader.read(&mut buffer) {
+                    Err(e) => {
+                        match e.kind() {
+                            io::ErrorKind::WouldBlock => {
+                                return Some(socket_status);
+                            },
+                            _ => {
+                                println!("{:?}",e);
+                                return None;
+                            },
+                        }
+                    },
+                    Ok(m) => {
+                        if m == 0 {
+                            break;
+                        }
+                    },
+                };
+                socket_status.data_readed.append(&mut buffer.to_vec());
+                //socket_status
+                if buffer[0] == 0 {break};
+                if *buffer.last().unwrap() == 0 {break;}
+            }
+            socket_status.reading = false;
         }
 
-        let request_string =  String::from_utf8(request_buffer).unwrap();
+        let request_string =  String::from_utf8(socket_status.data_readed.clone()).unwrap();
         // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {
             eprintln!("{}", request.err().unwrap());
-            return false;
+            return None;
         }
         let request = request.unwrap();
-        let response = action(request);
-        let r = writer.write_all(&response);
-        if r.is_err() {
-            eprintln!("Error1: {}", r.err().unwrap());
+        if socket_status.data_write.len() == 0 {
+            socket_status.data_write = action(request);
+        }
+        for chunk in socket_status.data_write.chunks(1).skip(socket_status.index_writed).into_iter() {
+            let r = writer.write(chunk);
+            if r.is_err() {
+                let error = r.err().unwrap();
+                if error.kind() == io::ErrorKind::WouldBlock {
+                    return Some(socket_status);
+                } else {
+                    return None;
+                }
+            }
+            socket_status.index_writed+=1;
         }
         let r = writer.flush();
         if r.is_err() {
             eprintln!("Error2: {}", r.err().unwrap());
         }
         let _ = stream.shutdown(Shutdown::Both);
-        false
+        None
     }
 }
 
