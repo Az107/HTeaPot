@@ -12,6 +12,8 @@ use std::os::macos::raw::stat;
 use std::{str, thread, vec};
 use std::sync::{Arc, Mutex, Condvar};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -287,6 +289,7 @@ impl Hteapot {
             HashMap::new()
         };
         headers.insert("Content-Length".to_string(), content.len().to_string());
+        headers.insert("Server".to_string(), format!("HTeaPot/{}",VERSION).to_string());
         for (key, value) in headers.iter() {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
@@ -417,23 +420,26 @@ impl Hteapot {
         if socket_status.data_write.len() == 0 {
             socket_status.data_write = action(request);
         }
-        for chunk in socket_status.data_write.chunks(1).skip(socket_status.index_writed).into_iter() {
-            let r = writer.write(chunk);
-            if r.is_err() {
-                let error = r.err().unwrap();
-                if error.kind() == io::ErrorKind::WouldBlock {
-                    return Some(socket_status);
-                } else {
-                    return None;
+            for n in socket_status.index_writed..socket_status.data_write.len() {
+                let r = writer.write(&[socket_status.data_write[n]]);
+                if r.is_err() {
+                    let error = r.err().unwrap();
+                    if error.kind() == io::ErrorKind::WouldBlock {
+                        return Some(socket_status);
+                    } else {
+                        return None;
+                    }
                 }
+                socket_status.index_writed+=r.unwrap();
             }
-            socket_status.index_writed+=1;
-        }
+        
+    
         let r = writer.flush();
         if r.is_err() {
             eprintln!("Error2: {}", r.err().unwrap());
+            return Some(socket_status);
         }
-        let _ = stream.shutdown(Shutdown::Both);
+        //let _ = stream.shutdown(Shutdown::Both);
         None
     }
 }
