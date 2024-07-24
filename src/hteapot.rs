@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::macos::raw::stat;
+use std::os::fd::AsRawFd;
 use std::{str, thread, vec};
 use std::sync::{Arc, Mutex, Condvar};
 
@@ -439,7 +439,7 @@ impl Hteapot {
             eprintln!("Error2: {}", r.err().unwrap());
             return Some(socket_status);
         }
-        //let _ = stream.shutdown(Shutdown::Both);
+        let _ = stream.shutdown(Shutdown::Both);
         None
     }
 }

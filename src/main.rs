@@ -102,7 +102,6 @@ fn main() {
         };
         match content {
             Ok(content) => {
-
                 if config.cache {
                     let cache = cache.lock();
                     if cache.is_ok() && is_cache {
