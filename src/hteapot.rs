@@ -8,7 +8,6 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::os::fd::AsRawFd;
 use std::{str, thread, vec};
 use std::sync::{Arc, Mutex, Condvar};
 
@@ -158,7 +157,7 @@ pub struct Hteapot {
 
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 struct SocketStatus {
     reading: bool,
     data_readed: Vec<u8>,
@@ -237,10 +236,10 @@ impl Hteapot {
                                     reading: true,
                                     data_readed: vec![],
                                     data_write: vec![],
-                                    index_writed: 0,
+                                    index_writed: 0
                                 }
                             };
-        
+
                             let r = Hteapot::handle_client(stream,status, move |request| {
                                         action_clone(request)
                             });
@@ -265,7 +264,7 @@ impl Hteapot {
             }
             let  (stream, _) = stream.unwrap();
             stream.set_nonblocking(true).expect("Error seting non blocking");
-            stream.set_nodelay(true).expect("Error seting no delay");
+            //stream.set_nodelay(true).expect("Error seting no delay");
             {
                 let (lock, cvar) = &*pool_clone;
                 let mut pool = lock.lock().expect("Error locking pool");
@@ -390,15 +389,13 @@ impl Hteapot {
                                 return Some(socket_status);
                             },
                             _ => {
-                                println!("{:?}",e);
+                                println!("R Error{:?}",e);
                                 return None;
                             },
                         }
                     },
                     Ok(m) => {
-                        if m == 0 {
-                            break;
-                        }
+                        if m == 0 {break;}
                     },
                 };
                 socket_status.data_readed.append(&mut buffer.to_vec());
@@ -413,7 +410,7 @@ impl Hteapot {
         // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {
-            eprintln!("{}", request.err().unwrap());
+            eprintln!("Request parse error {:?}", request.err().unwrap());
             return None;
         }
         let request = request.unwrap();
@@ -427,6 +424,7 @@ impl Hteapot {
                     if error.kind() == io::ErrorKind::WouldBlock {
                         return Some(socket_status);
                     } else {
+                        eprintln!("W error: {:?}",error);
                         return None;
                     }
                 }
