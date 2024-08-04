@@ -1,6 +1,6 @@
 [HTEAPOT]
 port = 8081
-host = "0.0.0.0" #test de comentario
+host = "0.0.0.0" 
 root = "public"
 threads = 5
 cache = true
@@ -8,3 +8,4 @@ cache_ttl = 3600
 [proxy]
 "/test" = "http://example.com"
 "/google" = "http://google.com"
+# "/" = "http://ifconfig.co" # this will override all the proxys and local request 
