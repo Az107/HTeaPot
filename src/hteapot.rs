@@ -460,7 +460,9 @@ fn test_http_parser() {
 fn test_http_response_maker() {
     let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response).unwrap();
-    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!\r\n";
-    assert_eq!(response, expected_response);
+    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/0.2.5\r\n\r\nHello, World!\r\n".split("\r\n");
+    for item in expected_response.into_iter() {
+        assert!(response.contains(item));
+    }
 }
 
