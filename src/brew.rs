@@ -3,10 +3,11 @@
 
 use std::{io::{Read, Write}, net::TcpStream};
 
-
+#[derive(Debug)]
 struct Url {
   scheme: String,
   domain: String,
+  path: String,
   port: String
 }
 
@@ -14,7 +15,7 @@ struct Url {
 fn parse_url(url: &str) -> Result<Url,&str> {
   let url_parts = url.split(":").collect::<Vec<&str>>();
   let prefix = url_parts[0];
-  let domain = url_parts[1].trim_start_matches("//");
+  let domain_path = url_parts[1].trim_start_matches("//");
   let port = if url_parts.len() == 3 {
     url_parts[2]
   } else {
@@ -24,9 +25,11 @@ fn parse_url(url: &str) -> Result<Url,&str> {
       _ => "80"
     }
   };
+  let (domain,path) = domain_path.split_once('/').unwrap();
   Ok(Url {
     scheme: prefix.to_string(),
     domain: domain.to_string(),
+    path: path.to_string(),
     port: port.to_string()
   })
 }
@@ -43,7 +46,7 @@ pub fn fetch(url: &str) -> Result<String,&str> {
     return Err("Error fetching");
   }
   let mut client = client.unwrap();
-  let http_request = format!("GET / HTTP/1.1\r\nHost: {}\r\n\r\n", url.domain);
+  let http_request = format!("GET /{} HTTP/1.1\r\nHost: {}\r\n\r\n",url.path, url.domain);
   client.write(http_request.as_bytes()).unwrap();
   let mut response = String::new();
   let mut buffer = [0; 1024];

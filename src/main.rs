@@ -42,10 +42,19 @@ fn main() {
         } else {
             req.path.clone()
         };
-        if config.proxy_rules.contains_key(&req.path) {
-            logger.lock().expect("this doesnt work :C").msg(format!("Proxying to: {}", config.proxy_rules.get(&req.path).unwrap()));
-            let url = config.proxy_rules.get(&req.path).unwrap();
-            return match fetch(url) {
+        let path_clone = req.path.clone();
+        let divided_path: Vec<&str> = path_clone.split('/').skip(1).collect();
+        if divided_path.is_empty() {
+            return Hteapot::response_maker(HttpStatus::BadRequest, b"Invalid path", None);
+        }
+        
+        let first_one = format!("/{}",divided_path[0]);
+        let rest_path = divided_path[1..].join("/");
+        if config.proxy_rules.contains_key(&first_one) {
+            let url = config.proxy_rules.get(&first_one).unwrap();
+            let url = format!("{}/{}",url,rest_path);
+            logger.lock().expect("this doesnt work :C").msg(format!("Proxying to: {}", url));
+            return match fetch(&url) {
                 Ok(response) => {
                     response.into()
                 },
