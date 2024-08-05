@@ -36,6 +36,7 @@ fn main() {
     } else {
         config::Config::new_default()
     };
+    let proxy_only = config.proxy_rules.get("/").is_some();
     let logger = Mutex::new(Logger::new(io::stdout()));
     let cache: Mutex<HashMap<String, (Vec<u8>, u64)>> = Mutex::new(HashMap::new());
     let server = Hteapot::new_threaded(config.host.as_str(), config.port,config.threads);
@@ -43,6 +44,10 @@ fn main() {
     if config.cache {
         logger.lock().expect("this doesnt work :C").msg("Cache Enabled".to_string());
     }
+    if proxy_only {
+        logger.lock().expect("this doesnt work :C").msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
+    }
+    
 
     server.listen( move |req| {
         //let mut logger = Logger::new(io::stdout());
@@ -54,12 +59,32 @@ fn main() {
         } else {
             req.path.clone()
         };
-        if config.proxy_rules.contains_key(&req.path) {
-            logger.lock().expect("this doesnt work :C").msg(format!("Proxying to: {}", config.proxy_rules.get(&req.path).unwrap()));
-            let url = config.proxy_rules.get(&req.path).unwrap();
-            return match fetch(url) {
+        let path_clone = req.path.clone();
+        let divided_path: Vec<&str> = path_clone.split('/').skip(1).collect();
+        if divided_path.is_empty() {
+            return Hteapot::response_maker(HttpStatus::BadRequest, b"Invalid path", None);
+        }
+        
+        let first_one = format!("/{}",divided_path[0]);
+        let rest_path = divided_path[1..].join("/");
+
+        if proxy_only || config.proxy_rules.contains_key(&first_one) {
+            let url = if proxy_only {
+                let url = config.proxy_rules.get("/").unwrap();
+                if rest_path.len() != 0 {
+                    format!("{}{}/{}",url,first_one,rest_path)
+                    
+                } else {
+                    format!("{}{}",url,first_one)
+                }
+            } else {                
+                let url = config.proxy_rules.get(&first_one).unwrap();
+                format!("{}/{}",url,rest_path)
+            };
+            logger.lock().expect("this doesnt work :C").msg(format!("Proxying to: {}", url));
+            return match fetch(&url) {
                 Ok(response) => {
-                    response.into()
+                    response
                 },
                 Err(err) => {
                     Hteapot::response_maker(HttpStatus::InternalServerError, err.as_bytes(), None)
