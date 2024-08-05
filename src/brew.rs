@@ -49,7 +49,6 @@ pub fn fetch(url: &str) -> Result<Vec<u8>,&str> {
   let mut client = client.unwrap();
   let http_request = format!("GET /{} HTTP/1.1\r\nHost: {}\r\n\r\n",url.path, url.domain);
   client.write(http_request.as_bytes()).unwrap();
-  let mut response = String::new();
   let mut full_buffer: Vec<u8> = Vec::new();
   let mut buffer = [0; 1024];
   loop {

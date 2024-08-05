@@ -28,18 +28,18 @@ fn main() {
     let logger = Mutex::new(Logger::new(io::stdout()));
     let cache: Mutex<HashMap<String, (Vec<u8>, u64)>> = Mutex::new(HashMap::new());
     let server = Hteapot::new_threaded(config.host.as_str(), config.port,config.threads);
-    logger.lock().expect("this doesnt work :C").msg(format!("Server started at http://{}:{}", config.host, config.port));
+    logger.lock().expect("Error getting logger").msg(format!("Server started at http://{}:{}", config.host, config.port));
     if config.cache {
-        logger.lock().expect("this doesnt work :C").msg("Cache Enabled".to_string());
+        logger.lock().expect("Error getting logger").msg("Cache Enabled".to_string());
     }
     if proxy_only {
-        logger.lock().expect("this doesnt work :C").msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
+        logger.lock().expect("Error getting logger").msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
     }
     
 
     server.listen( move |req| {
         //let mut logger = Logger::new(io::stdout());
-        logger.lock().expect("this doesnt work :C").msg(format!("Request {} {}",req.method.to_str(), req.path));
+        logger.lock().expect("Error getting logger").msg(format!("Request {} {}",req.method.to_str(), req.path));
         let path = if req.path.ends_with("/") {
             let mut path = req.path.clone();
             path.push_str(&config.index);
@@ -69,7 +69,7 @@ fn main() {
                 let url = config.proxy_rules.get(&first_one).unwrap();
                 format!("{}/{}",url,rest_path)
             };
-            logger.lock().expect("this doesnt work :C").msg(format!("Proxying to: {}", url));
+            logger.lock().expect("Error getting logger").msg(format!("Proxying to: {}", url));
             return match fetch(&url) {
                 Ok(response) => {
                     response
