@@ -16,9 +16,21 @@ use hteapot::HttpStatus;
 use brew::fetch;
 use logger::Logger;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
+    if args[1] == "--version" ||args[1] == "-v" {
+        println!("Hteapot {}",VERSION);
+        return;
+    }
+    if args[1] == "--help" ||args[1] == "-h" {
+        println!("Hteapot {}",VERSION);
+        println!("usage: {} <config file>",args[0]);
+        return;
+    }
+
     let config = if args.len() > 1 {
         config::Config::load_config(&args[1])
     } else {
@@ -115,7 +127,6 @@ fn main() {
         };
         match content {
             Ok(content) => {
-
                 if config.cache {
                     let cache = cache.lock();
                     if cache.is_ok() && is_cache {
