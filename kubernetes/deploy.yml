@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hteapot
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hteapot
+  template:
+    metadata:
+      labels:
+        app: hteapot
+    spec:
+      containers:
+        - name: hteapot
+          image: enesim/hteapot:latest # Reemplaza esto con el nombre de tu imagen
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config.toml # Monta aquí el archivo de configuración
+              subPath: config.toml # Monta específicamente el archivo, no todo el volumen
+            - name: public-volume
+              mountPath: /app/public
+      volumes:
+        - name: config-volume
+          configMap:
+            name: mi-configmap
+        - name: public-volume
+          hostPath:
+            path: /Users/albertoruiz/Projects/HTeaPot/public
+            type: DirectoryOrCreate
