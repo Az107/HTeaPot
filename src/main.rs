@@ -12,6 +12,7 @@ use std::time::SystemTime;
 
 use brew::fetch;
 use hteapot::Hteapot;
+
 use hteapot::HttpStatus;
 use logger::Logger;
 

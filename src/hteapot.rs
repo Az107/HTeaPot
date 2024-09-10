@@ -22,6 +22,7 @@ pub enum HttpMethod {
     OPTIONS,
     TRACE,
     CONNECT,
+    Other(String),
 }
 
 impl HttpMethod {
@@ -36,7 +37,7 @@ impl HttpMethod {
             "OPTIONS" => HttpMethod::OPTIONS,
             "TRACE" => HttpMethod::TRACE,
             "CONNECT" => HttpMethod::CONNECT,
-            _ => panic!("Invalid HTTP method"),
+            _ => Self::Other(method.to_string()),
         }
     }
     pub fn to_str(&self) -> &str {
@@ -50,6 +51,7 @@ impl HttpMethod {
             HttpMethod::OPTIONS => "OPTIONS",
             HttpMethod::TRACE => "TRACE",
             HttpMethod::CONNECT => "CONNECT",
+            HttpMethod::Other(method) => method.as_str(),
         }
     }
 }
@@ -475,8 +477,9 @@ fn test_http_parser() {
 fn test_http_response_maker() {
     let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response).unwrap();
-    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/0.2.5\r\n\r\nHello, World!\r\n".split("\r\n");
-    for item in expected_response.into_iter() {
+    let expected_response = format!("HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",VERSION);
+    let expected_response_list = expected_response.split("\r\n");
+    for item in expected_response_list.into_iter() {
         assert!(response.contains(item));
     }
 }
