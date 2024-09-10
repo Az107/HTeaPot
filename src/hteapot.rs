@@ -2,20 +2,16 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
-
-
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::{str, thread};
-use std::sync::{Arc, Mutex, Condvar};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Eq)]
-#[derive(Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -70,6 +66,11 @@ macro_rules! headers {
     };
 }
 
+#[derive(Clone, Copy)]
+pub enum Protocol {
+    HTTP,
+    HTTPS,
+}
 
 #[derive(Clone, Copy)]
 pub enum HttpStatus {
@@ -134,9 +135,7 @@ impl HttpStatus {
             HttpStatus::ServiceUnavailable => "Service Unavailable",
         }
     }
-
 }
-
 
 pub struct HttpRequest {
     pub method: HttpMethod,
@@ -152,11 +151,17 @@ pub struct Hteapot {
     threads: u16,
     //cache: HashMap<String,String>,
     //pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
+}
 
+#[derive(Clone, Debug)]
+struct SocketStatus {
+    reading: bool,
+    data_readed: Vec<u8>,
+    data_write: Vec<u8>,
+    index_writed: usize,
 }
 
 impl Hteapot {
-
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
         Hteapot {
@@ -164,7 +169,6 @@ impl Hteapot {
             address: address.to_string(),
             threads: 1,
             //cache: HashMap::new(),
-
         }
     }
 
@@ -174,13 +178,11 @@ impl Hteapot {
             address: address.to_string(),
             threads: thread,
             //cache: HashMap::new(),
-
         }
     }
-    
 
     // Start the server
-    pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ){
+    pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static) {
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -188,39 +190,59 @@ impl Hteapot {
             Err(e) => {
                 eprintln!("Error L: {}", e);
                 return;
-            }   
+            }
         };
-        let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
+            Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
         let arc_action = Arc::new(action);
-
 
         for _tn in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
+                let mut streams_data: HashMap<String, SocketStatus> = HashMap::new();
                 loop {
-                        {
-                            let (lock, cvar) = &*pool_clone;
-                            let mut pool = lock.lock().expect("Error locking pool");
-                            if  streams_to_handle.is_empty() {
-                                pool = cvar.wait_while(pool, |pool| pool.is_empty()).expect("Error waiting on cvar");
-                                
-                            }
-                        
-                            if !pool.is_empty() {
-                                streams_to_handle.push(pool.pop_back().unwrap());
-                            } 
-                            
+                    {
+                        let (lock, cvar) = &*pool_clone;
+                        let mut pool = lock.lock().expect("Error locking pool");
+                        if streams_to_handle.is_empty() {
+                            pool = cvar
+                                .wait_while(pool, |pool| pool.is_empty())
+                                .expect("Error waiting on cvar");
                         }
-                        
-                        streams_to_handle.retain(|stream| {
-                            //println!("Handling request by {}", tn);
-                            let action_clone = action_clone.clone();
-                            Hteapot::handle_client(stream, move |request| {
-                                        action_clone(request)
-                            })
+
+                        if !pool.is_empty() {
+                            streams_to_handle.push(pool.pop_back().unwrap());
+                        }
+                    }
+
+                    streams_to_handle.retain(|stream| {
+                        //println!("Handling request by {}", tn);
+                        let local_addr = stream.local_addr().unwrap().to_string();
+                        let action_clone = action_clone.clone();
+                        let status = match streams_data.get(&local_addr) {
+                            Some(d) => d.clone(),
+                            None => SocketStatus {
+                                reading: true,
+                                data_readed: vec![],
+                                data_write: vec![],
+                                index_writed: 0,
+                            },
+                        };
+
+                        let r = Hteapot::handle_client(stream, status, move |request| {
+                            action_clone(request)
                         });
+                        if r.is_some() {
+                            streams_data.insert(local_addr, r.unwrap());
+                            return true;
+                        } else {
+                            streams_data.remove(&local_addr);
+                            return false;
+                        }
+                    });
                 }
             });
         }
@@ -231,23 +253,28 @@ impl Hteapot {
             if stream.is_err() {
                 continue;
             }
-            let  (stream, _) = stream.unwrap();
-            stream.set_nonblocking(true).expect("Error seting non blocking");
-            stream.set_nodelay(true).expect("Error seting no delay");
+            let (stream, _) = stream.unwrap();
+            stream
+                .set_nonblocking(true)
+                .expect("Error seting non blocking");
+            //stream.set_nodelay(true).expect("Error seting no delay");
             {
                 let (lock, cvar) = &*pool_clone;
                 let mut pool = lock.lock().expect("Error locking pool");
-                
+
                 pool.push_front(stream);
-                cvar.notify_one(); 
+                cvar.notify_one();
             }
-             // Notify one waiting thread
+            // Notify one waiting thread
         }
     }
 
-
     // Create a response
-    pub fn response_maker<B: AsRef<[u8]>>(status: HttpStatus, content: B, headers: Option<HashMap<String,String>>) -> Vec<u8> {
+    pub fn response_maker<B: AsRef<[u8]>>(
+        status: HttpStatus,
+        content: B,
+        headers: Option<HashMap<String, String>>,
+    ) -> Vec<u8> {
         let content = content.as_ref();
         let status_text = status.to_string();
         let mut headers_text = String::new();
@@ -257,10 +284,17 @@ impl Hteapot {
             HashMap::new()
         };
         headers.insert("Content-Length".to_string(), content.len().to_string());
+        headers.insert(
+            "Server".to_string(),
+            format!("HTeaPot/{}", VERSION).to_string(),
+        );
         for (key, value) in headers.iter() {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
-        let response_header = format!("HTTP/1.1 {} {}\r\n{}\r\n",status as u16, status_text,headers_text);
+        let response_header = format!(
+            "HTTP/1.1 {} {}\r\n{}\r\n",
+            status as u16, status_text, headers_text
+        );
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
         response.extend_from_slice(content);
@@ -291,7 +325,9 @@ impl Hteapot {
         let mut headers: HashMap<String, String> = HashMap::new();
         loop {
             let line = lines.next();
-            if line.is_none() {break;}
+            if line.is_none() {
+                break;
+            }
             let line = line.unwrap();
             if line.is_empty() {
                 break;
@@ -301,7 +337,12 @@ impl Hteapot {
             let value = parts.next().unwrap();
             headers.insert(key, value.to_string());
         }
-        let body = lines.collect::<Vec<&str>>().join("").trim().trim_end_matches(char::from(0)).to_string();
+        let body = lines
+            .collect::<Vec<&str>>()
+            .join("")
+            .trim()
+            .trim_end_matches(char::from(0))
+            .to_string();
         let mut args: HashMap<String, String> = HashMap::new();
         //remove http or https from the path
         if path.starts_with("http://") {
@@ -343,63 +384,85 @@ impl Hteapot {
     }
 
     // Handle the client when a request is received
-    fn handle_client(stream: &TcpStream , action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static  ) -> bool{
+    fn handle_client(
+        stream: &TcpStream,
+        socket_status: SocketStatus,
+        action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static,
+    ) -> Option<SocketStatus> {
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
-        let mut request_buffer = Vec::new();
-        loop {
-            let mut buffer = [0; 1024];
-            match reader.read(&mut buffer) {
-                Err(e) => {
-                    match e.kind() {
+        let mut socket_status = socket_status.clone();
+        if socket_status.reading {
+            loop {
+                let mut buffer = [0; 1024];
+                match reader.read(&mut buffer) {
+                    Err(e) => match e.kind() {
                         io::ErrorKind::WouldBlock => {
-                            return true;
-                        },
+                            return Some(socket_status);
+                        }
                         _ => {
-                            println!("{:?}",e);
-                            return false;
-                        },
+                            println!("R Error{:?}", e);
+                            return None;
+                        }
+                    },
+                    Ok(m) => {
+                        if m == 0 {
+                            break;
+                        }
                     }
-                },
-                Ok(m) => {
-                    if m == 0 {
-                        break;
-                    }
-                },
-            };
-            request_buffer.append(&mut buffer.to_vec());
-            if buffer[0] == 0 {break};
-            if *buffer.last().unwrap() == 0 {break;}
+                };
+                socket_status.data_readed.append(&mut buffer.to_vec());
+                //socket_status
+                if buffer[0] == 0 {
+                    break;
+                };
+                if *buffer.last().unwrap() == 0 {
+                    break;
+                }
+            }
+            socket_status.reading = false;
         }
 
-        let request_string =  String::from_utf8(request_buffer).unwrap();
+        let request_string = String::from_utf8(socket_status.data_readed.clone()).unwrap();
         // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {
-            eprintln!("{}", request.err().unwrap());
-            return false;
+            eprintln!("Request parse error {:?}", request.err().unwrap());
+            return None;
         }
         let request = request.unwrap();
-        let response = action(request);
-        let r = writer.write_all(&response);
-        if r.is_err() {
-            eprintln!("Error1: {}", r.err().unwrap());
+        if socket_status.data_write.len() == 0 {
+            socket_status.data_write = action(request);
         }
+        for n in socket_status.index_writed..socket_status.data_write.len() {
+            let r = writer.write(&[socket_status.data_write[n]]);
+            if r.is_err() {
+                let error = r.err().unwrap();
+                if error.kind() == io::ErrorKind::WouldBlock {
+                    return Some(socket_status);
+                } else {
+                    eprintln!("W error: {:?}", error);
+                    return None;
+                }
+            }
+            socket_status.index_writed += r.unwrap();
+        }
+
         let r = writer.flush();
         if r.is_err() {
             eprintln!("Error2: {}", r.err().unwrap());
+            return Some(socket_status);
         }
         let _ = stream.shutdown(Shutdown::Both);
-        false
+        None
     }
 }
 
-
 #[cfg(test)]
-
 #[test]
 fn test_http_parser() {
-    let request = "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
+    let request =
+        "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
     let parsed_request = Hteapot::request_parser(request.to_string()).unwrap();
     assert_eq!(parsed_request.method, HttpMethod::GET);
     assert_eq!(parsed_request.path, "/");
@@ -412,7 +475,8 @@ fn test_http_parser() {
 fn test_http_response_maker() {
     let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response).unwrap();
-    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\n\r\nHello, World!\r\n";
-    assert_eq!(response, expected_response);
+    let expected_response = "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/0.2.5\r\n\r\nHello, World!\r\n".split("\r\n");
+    for item in expected_response.into_iter() {
+        assert!(response.contains(item));
+    }
 }
-
