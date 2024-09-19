@@ -310,18 +310,18 @@ impl Hteapot {
         let mut lines = request.lines();
         let first_line = lines.next();
         if first_line.is_none() {
-            return Err("Error parsng request".to_string());
+            return Err("Invalid request".to_string());
         }
         let first_line = first_line.unwrap();
         let mut words = first_line.split_whitespace();
         let method = words.next();
         if method.is_none() {
-            return Err("Error parsng request".to_string());
+            return Err("Invalid method".to_string());
         }
         let method = method.unwrap();
         let path = words.next();
         if path.is_none() {
-            return Err("Error parsng request".to_string());
+            return Err("Invalid path".to_string());
         }
         let mut path = path.unwrap().to_string();
         let mut headers: HashMap<String, String> = HashMap::new();
