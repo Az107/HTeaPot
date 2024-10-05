@@ -20,14 +20,19 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
-    if args[1] == "--version" || args[1] == "-v" {
-        println!("Hteapot {}", VERSION);
-        return;
-    }
-    if args[1] == "--help" || args[1] == "-h" {
-        println!("Hteapot {}", VERSION);
-        println!("usage: {} <config file>", args[0]);
-        return;
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "--help" | "-h" => {
+                println!("Hteapot {}", VERSION);
+                println!("usage: {} <config file>", args[0]);
+                return;
+            }
+            "--version" | "-v" => {
+                println!("Hteapot {}", VERSION);
+                return;
+            }
+            _ => "",
+        };
     }
 
     let config = if args.len() > 1 {
@@ -154,7 +159,7 @@ fn main() {
                 return Hteapot::response_maker(
                     HttpStatus::OK,
                     &content,
-                    headers!("Connection" => "close"),
+                    headers!("Connection" => req.headers.get("Connection").unwrap_or(&"close".to_string())),
                 );
             }
             Err(e) => match e.kind() {

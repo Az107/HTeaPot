@@ -1,8 +1,8 @@
 [HTEAPOT]
 port = 8081
 host = "0.0.0.0"
+threads = 0
 root = "public"
-threads = 5
 cache = true
 cache_ttl = 3600
 [proxy]

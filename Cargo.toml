@@ -1,11 +1,7 @@
 [package]
 name = "hteapot"
-version = "0.2.6"
-exclude = [
-  "hteapot.toml",
-  "public/",
-  "readme.md"
-]
+version = "0.2.7"
+exclude = ["hteapot.toml", "public/", "readme.md"]
 license = "MIT"
 keywords = ["HTTP", "HTTP-SERVER"]
 description = "HTeaPot is a lightweight HTTP server library designed to be easy to use and extend."
@@ -21,5 +17,3 @@ path = "src/hteapot.rs"
 
 [[bin]]
 name = "hteapot"
-
-

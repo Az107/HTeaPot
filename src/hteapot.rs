@@ -157,6 +157,7 @@ pub struct Hteapot {
 
 #[derive(Clone, Debug)]
 struct SocketStatus {
+    requests: usize, // TODO: write proper ttl
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
@@ -167,18 +168,18 @@ impl Hteapot {
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
         Hteapot {
-            port: port,
+            port,
             address: address.to_string(),
             threads: 1,
             //cache: HashMap::new(),
         }
     }
 
-    pub fn new_threaded(address: &str, port: u16, thread: u16) -> Self {
+    pub fn new_threaded(address: &str, port: u16, threads: u16) -> Self {
         Hteapot {
-            port: port,
+            port,
             address: address.to_string(),
-            threads: thread,
+            threads: if threads == 0 { 1 } else { threads },
             //cache: HashMap::new(),
         }
     }
@@ -219,7 +220,7 @@ impl Hteapot {
                             streams_to_handle.push(pool.pop_back().unwrap());
                         }
                     }
-
+                    //println!("Streams: {}", streams_to_handle.len());
                     streams_to_handle.retain(|stream| {
                         //println!("Handling request by {}", tn);
                         let local_addr = stream.local_addr().unwrap().to_string();
@@ -227,6 +228,7 @@ impl Hteapot {
                         let status = match streams_data.get(&local_addr) {
                             Some(d) => d.clone(),
                             None => SocketStatus {
+                                requests: 0,
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
@@ -290,6 +292,7 @@ impl Hteapot {
             "Server".to_string(),
             format!("HTeaPot/{}", VERSION).to_string(),
         );
+        //headers.insert("Connection".to_string(), "keep-alive".to_string());
         for (key, value) in headers.iter() {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
@@ -310,6 +313,7 @@ impl Hteapot {
         let mut lines = request.lines();
         let first_line = lines.next();
         if first_line.is_none() {
+            println!("{}", request);
             return Err("Invalid request".to_string());
         }
         let first_line = first_line.unwrap();
@@ -409,7 +413,7 @@ impl Hteapot {
                     },
                     Ok(m) => {
                         if m == 0 {
-                            break;
+                            return None;
                         }
                     }
                 };
@@ -433,6 +437,10 @@ impl Hteapot {
             return None;
         }
         let request = request.unwrap();
+        let keep_alive = match request.headers.get("Connection") {
+            Some(ch) => ch == "keep-alive",
+            None => false,
+        };
         if socket_status.data_write.len() == 0 {
             socket_status.data_write = action(request);
         }
@@ -455,8 +463,18 @@ impl Hteapot {
             eprintln!("Error2: {}", r.err().unwrap());
             return Some(socket_status);
         }
-        let _ = stream.shutdown(Shutdown::Both);
-        None
+        if keep_alive {
+            socket_status.requests += 1; //TODO: remove this
+            println!("Keeping alive: {}", socket_status.requests);
+            socket_status.reading = true;
+            socket_status.data_readed = vec![];
+            socket_status.data_write = vec![];
+            socket_status.index_writed = 0;
+            return Some(socket_status);
+        } else {
+            let _ = stream.shutdown(Shutdown::Both);
+            None
+        }
     }
 }
 
