@@ -147,6 +147,73 @@ pub struct HttpRequest {
     pub body: String,
 }
 
+pub struct HttpResponse {
+    pub status: HttpStatus,
+    pub headers: HashMap<String, String>,
+    pub content: Vec<u8>,
+    raw: Option<Vec<u8>>,
+    is_raw: bool,
+}
+
+impl HttpResponse {
+    pub fn new<B: AsRef<[u8]>>(
+        status: HttpStatus,
+        content: B,
+        headers: Option<HashMap<String, String>>,
+    ) -> Self {
+        let mut headers = headers.unwrap_or(HashMap::new());
+        let content = content.as_ref();
+        headers.insert("Content-Length".to_string(), content.len().to_string());
+        headers.insert(
+            "Server".to_string(),
+            format!("HTeaPot/{}", VERSION).to_string(),
+        );
+        HttpResponse {
+            status,
+            headers,
+            content: content.to_owned(),
+            raw: None,
+            is_raw: false,
+        }
+    }
+
+    pub fn new_raw(raw: Vec<u8>) -> Self {
+        HttpResponse {
+            status: HttpStatus::IAmATeapot,
+            headers: HashMap::new(),
+            content: vec![],
+            raw: Some(raw),
+            is_raw: true,
+        }
+    }
+
+    pub fn is_raw(&self) -> bool {
+        self.is_raw
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        if self.is_raw() {
+            return self.raw.clone().unwrap();
+        }
+        let mut headers_text = String::new();
+        for (key, value) in self.headers.iter() {
+            headers_text.push_str(&format!("{}: {}\r\n", key, value));
+        }
+        let response_header = format!(
+            "HTTP/1.1 {} {}\r\n{}\r\n",
+            self.status as u16,
+            self.status.to_string(),
+            headers_text
+        );
+        let mut response = Vec::new();
+        response.extend_from_slice(response_header.as_bytes());
+        response.append(&mut self.content.clone());
+        response.push(0x0D); // Carriage Return
+        response.push(0x0A); // Line Feed
+        response
+    }
+}
+
 pub struct Hteapot {
     port: u16,
     address: String,
@@ -157,7 +224,7 @@ pub struct Hteapot {
 
 #[derive(Clone, Debug)]
 struct SocketStatus {
-    requests: usize, // TODO: write proper ttl
+    // TODO: write proper ttl
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
@@ -185,7 +252,7 @@ impl Hteapot {
     }
 
     // Start the server
-    pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static) {
+    pub fn listen(&self, action: impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static) {
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -228,7 +295,6 @@ impl Hteapot {
                         let status = match streams_data.get(&local_addr) {
                             Some(d) => d.clone(),
                             None => SocketStatus {
-                                requests: 0,
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
@@ -271,41 +337,6 @@ impl Hteapot {
             }
             // Notify one waiting thread
         }
-    }
-
-    // Create a response
-    pub fn response_maker<B: AsRef<[u8]>>(
-        status: HttpStatus,
-        content: B,
-        headers: Option<HashMap<String, String>>,
-    ) -> Vec<u8> {
-        let content = content.as_ref();
-        let status_text = status.to_string();
-        let mut headers_text = String::new();
-        let mut headers = if headers.is_some() {
-            headers.unwrap()
-        } else {
-            HashMap::new()
-        };
-        headers.insert("Content-Length".to_string(), content.len().to_string());
-        headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
-        //headers.insert("Connection".to_string(), "keep-alive".to_string());
-        for (key, value) in headers.iter() {
-            headers_text.push_str(&format!("{}: {}\r\n", key, value));
-        }
-        let response_header = format!(
-            "HTTP/1.1 {} {}\r\n{}\r\n",
-            status as u16, status_text, headers_text
-        );
-        let mut response = Vec::new();
-        response.extend_from_slice(response_header.as_bytes());
-        response.extend_from_slice(content);
-        response.push(0x0D); // Carriage Return
-        response.push(0x0A); // Line Feed
-        response
     }
 
     // Parse the request
@@ -393,7 +424,7 @@ impl Hteapot {
     fn handle_client(
         stream: &TcpStream,
         socket_status: SocketStatus,
-        action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static,
+        action: impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static,
     ) -> Option<SocketStatus> {
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
@@ -442,7 +473,17 @@ impl Hteapot {
             None => false,
         };
         if socket_status.data_write.len() == 0 {
-            socket_status.data_write = action(request);
+            let mut response = action(request);
+            if keep_alive {
+                response
+                    .headers
+                    .insert("Connection".to_string(), "keep_alive".to_string());
+            } else {
+                response
+                    .headers
+                    .insert("Connection".to_string(), "close".to_string());
+            }
+            socket_status.data_write = response.to_bytes();
         }
         for n in socket_status.index_writed..socket_status.data_write.len() {
             let r = writer.write(&[socket_status.data_write[n]]);
@@ -464,8 +505,6 @@ impl Hteapot {
             return Some(socket_status);
         }
         if keep_alive {
-            socket_status.requests += 1; //TODO: remove this
-            println!("Keeping alive: {}", socket_status.requests);
             socket_status.reading = true;
             socket_status.data_readed = vec![];
             socket_status.data_write = vec![];
@@ -493,8 +532,8 @@ fn test_http_parser() {
 
 #[test]
 fn test_http_response_maker() {
-    let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
-    let response = String::from_utf8(response).unwrap();
+    let response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
+    let response = String::from_utf8(response.to_bytes()).unwrap();
     let expected_response = format!("HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",VERSION);
     let expected_response_list = expected_response.split("\r\n");
     for item in expected_response_list.into_iter() {

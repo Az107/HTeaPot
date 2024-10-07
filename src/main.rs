@@ -11,9 +11,8 @@ use std::time;
 use std::time::SystemTime;
 
 use brew::fetch;
-use hteapot::Hteapot;
+use hteapot::{Hteapot, HttpResponse, HttpStatus};
 
-use hteapot::HttpStatus;
 use logger::Logger;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -78,7 +77,7 @@ fn main() {
         let path_clone = req.path.clone();
         let divided_path: Vec<&str> = path_clone.split('/').skip(1).collect();
         if divided_path.is_empty() {
-            return Hteapot::response_maker(HttpStatus::BadRequest, b"Invalid path", None);
+            return HttpResponse::new(HttpStatus::BadRequest, b"Invalid path", None);
         }
 
         let first_one = format!("/{}", divided_path[0]);
@@ -101,9 +100,9 @@ fn main() {
                 .expect("this doesnt work :C")
                 .msg(format!("Proxying to: {}", url));
             return match fetch(&url) {
-                Ok(response) => response,
+                Ok(response) => HttpResponse::new_raw(response),
                 Err(err) => {
-                    Hteapot::response_maker(HttpStatus::InternalServerError, err.as_bytes(), None)
+                    HttpResponse::new(HttpStatus::InternalServerError, err.as_bytes(), None)
                 }
             };
         }
@@ -156,22 +155,18 @@ fn main() {
                         cache.insert(path, (content.clone(), secs));
                     }
                 }
-                return Hteapot::response_maker(
-                    HttpStatus::OK,
-                    &content,
-                    headers!("Connection" => req.headers.get("Connection").unwrap_or(&"close".to_string())),
-                );
+                return HttpResponse::new(HttpStatus::OK, &content, None);
             }
             Err(e) => match e.kind() {
                 io::ErrorKind::NotFound => {
-                    return Hteapot::response_maker(
+                    return HttpResponse::new(
                         HttpStatus::NotFound,
                         "<h1> 404 Not Found </h1>",
                         headers!("Content-Type" => "text/html", "Server" => "HteaPot"),
                     );
                 }
                 _ => {
-                    return Hteapot::response_maker(
+                    return HttpResponse::new(
                         HttpStatus::InternalServerError,
                         "<h1> 500 Internal Server Error </h1>",
                         headers!("Content-Type" => "text/html", "Server" => "HteaPot"),
