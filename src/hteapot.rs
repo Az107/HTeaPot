@@ -231,6 +231,11 @@ struct SocketStatus {
     index_writed: usize,
 }
 
+struct SocketData {
+    stream: TcpStream,
+    status: Option<SocketStatus>,
+}
+
 impl Hteapot {
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
@@ -272,7 +277,6 @@ impl Hteapot {
             let action_clone = arc_action.clone();
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
-                let mut streams_data: HashMap<String, SocketStatus> = HashMap::new();
                 loop {
                     {
                         let (lock, cvar) = &*pool_clone;
@@ -284,35 +288,32 @@ impl Hteapot {
                         }
 
                         if !pool.is_empty() {
-                            streams_to_handle.push(pool.pop_back().unwrap());
-                        }
-                    }
-                    //println!("Streams: {}", streams_to_handle.len());
-                    streams_to_handle.retain(|stream| {
-                        //println!("Handling request by {}", tn);
-                        let local_addr = stream.local_addr().unwrap().to_string();
-                        let action_clone = action_clone.clone();
-                        let status = match streams_data.get(&local_addr) {
-                            Some(d) => d.clone(),
-                            None => SocketStatus {
+                            let socket_status = SocketStatus {
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
                                 index_writed: 0,
-                            },
-                        };
-
-                        let r = Hteapot::handle_client(stream, status, move |request| {
-                            action_clone(request)
-                        });
-                        if r.is_some() {
-                            streams_data.insert(local_addr, r.unwrap());
-                            return true;
-                        } else {
-                            streams_data.remove(&local_addr);
-                            return false;
+                            };
+                            let socket_data = SocketData {
+                                stream: pool.pop_back().unwrap(),
+                                status: Some(socket_status),
+                            };
+                            streams_to_handle.push(socket_data);
                         }
-                    });
+                    }
+                    //println!("Streams: {}", streams_to_handle.len());
+                    for stream_data in streams_to_handle.iter_mut() {
+                        //let action_clone = action_clone.clone();
+                        if stream_data.status.is_none() {
+                            continue;
+                        }
+                        let r = Hteapot::handle_client(
+                            &stream_data.stream,
+                            stream_data.status.as_mut().unwrap().clone(),
+                            &action_clone,
+                        );
+                        stream_data.status = r;
+                    }
                 }
             });
         }
@@ -327,7 +328,7 @@ impl Hteapot {
             stream
                 .set_nonblocking(true)
                 .expect("Error seting non blocking");
-            //stream.set_nodelay(true).expect("Error seting no delay");
+            stream.set_nodelay(true).expect("Error seting no delay");
             {
                 let (lock, cvar) = &*pool_clone;
                 let mut pool = lock.lock().expect("Error locking pool");
@@ -424,7 +425,7 @@ impl Hteapot {
     fn handle_client(
         stream: &TcpStream,
         socket_status: SocketStatus,
-        action: impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static,
+        action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
     ) -> Option<SocketStatus> {
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
