@@ -314,6 +314,7 @@ impl Hteapot {
                         );
                         stream_data.status = r;
                     }
+                    streams_to_handle.retain(|s| s.status.is_some());
                 }
             });
         }
