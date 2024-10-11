@@ -271,7 +271,6 @@ impl Hteapot {
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
         //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
         let arc_action = Arc::new(action);
-
         for _tn in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
@@ -303,7 +302,6 @@ impl Hteapot {
                     }
                     //println!("Streams: {}", streams_to_handle.len());
                     for stream_data in streams_to_handle.iter_mut() {
-                        //let action_clone = action_clone.clone();
                         if stream_data.status.is_none() {
                             continue;
                         }

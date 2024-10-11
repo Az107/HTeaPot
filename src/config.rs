@@ -101,7 +101,7 @@ pub struct Config {
     pub host: String, // Host name or IP
     pub root: String, // Root directory to serve files
     pub cache: bool,
-    pub cache_ttl: u64,
+    pub cache_ttl: u16,
     pub threads: u16,
     pub index: String, // Index file to serve by default
     //pub error: String, // Error file to serve when a file is not found
