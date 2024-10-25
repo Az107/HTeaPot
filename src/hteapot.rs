@@ -8,6 +8,7 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use  s
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -280,7 +281,7 @@ impl Hteapot {
                     {
                         let (lock, cvar) = &*pool_clone;
                         let mut pool = lock.lock().expect("Error locking pool");
-                        if streams_to_handle.is_empty() {
+                        if streams_to_handle.len() < 10 {
                             pool = cvar
                                 .wait_while(pool, |pool| pool.is_empty())
                                 .expect("Error waiting on cvar");
@@ -300,7 +301,7 @@ impl Hteapot {
                             streams_to_handle.push(socket_data);
                         }
                     }
-                    //println!("Streams: {}", streams_to_handle.len());
+
                     for stream_data in streams_to_handle.iter_mut() {
                         if stream_data.status.is_none() {
                             continue;
