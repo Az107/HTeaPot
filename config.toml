@@ -1,7 +1,7 @@
 [HTEAPOT]
 port = 8081
 host = "0.0.0.0"
-threads = 1
+threads = 4
 root = "public"
 cache = true
 cache_ttl = 3600

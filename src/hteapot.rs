@@ -8,7 +8,6 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use  s
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -271,17 +270,36 @@ impl Hteapot {
         let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
         //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
+        let priority_list: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
         let arc_action = Arc::new(action);
         for _tn in 0..self.threads {
+            let _tn = _tn as usize;
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
+            let pl_clone = priority_list.clone();
+            {
+                let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+
+                pl_lock.push(0);
+            }
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
                 loop {
                     {
                         let (lock, cvar) = &*pool_clone;
                         let mut pool = lock.lock().expect("Error locking pool");
-                        if streams_to_handle.len() < 10 {
+                        let pl_copy;
+                        {
+                            let pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+                            pl_copy = pl_lock.clone();
+                        }
+                        if streams_to_handle.is_empty()
+                            || streams_to_handle.len() < 10
+                                && pl_copy
+                                    .iter()
+                                    .find(|&&v| streams_to_handle.len() > v)
+                                    .is_none()
+                        {
                             pool = cvar
                                 .wait_while(pool, |pool| pool.is_empty())
                                 .expect("Error waiting on cvar");
@@ -299,6 +317,12 @@ impl Hteapot {
                                 status: Some(socket_status),
                             };
                             streams_to_handle.push(socket_data);
+
+                            {
+                                let mut pl_lock =
+                                    pl_clone.lock().expect("Errpr locking prority list");
+                                pl_lock[_tn] = streams_to_handle.len();
+                            }
                         }
                     }
 
@@ -314,6 +338,10 @@ impl Hteapot {
                         stream_data.status = r;
                     }
                     streams_to_handle.retain(|s| s.status.is_some());
+                    {
+                        let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+                        pl_lock[_tn] = streams_to_handle.len();
+                    }
                 }
             });
         }
