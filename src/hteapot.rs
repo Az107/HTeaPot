@@ -279,7 +279,6 @@ impl Hteapot {
             let pl_clone = priority_list.clone();
             {
                 let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
-
                 pl_lock.push(0);
             }
             thread::spawn(move || {
