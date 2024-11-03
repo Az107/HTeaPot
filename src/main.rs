@@ -61,7 +61,6 @@ fn main() {
     }
 
     server.listen(move |req| {
-        //let mut logger = Logger::new(io::stdout());
         logger.lock().expect("this doesnt work :C").msg(format!(
             "Request {} {}",
             req.method.to_str(),
@@ -151,7 +150,7 @@ fn main() {
                         let since_epoch = now
                             .duration_since(time::UNIX_EPOCH)
                             .expect("Time went backwards");
-                        let secs = since_epoch.as_secs() + config.cache_ttl;
+                        let secs = since_epoch.as_secs() + config.cache_ttl as u64;
                         cache.insert(path, (content.clone(), secs));
                     }
                 }
