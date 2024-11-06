@@ -1,4 +1,4 @@
-# HteaPot HTTP Server
+# 🍵 HteaPot HTTP Server
 
 [Spanish](docs/readme-es.md) | English
 
