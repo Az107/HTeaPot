@@ -2,59 +2,22 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
+mod methods;
+mod response;
+mod status;
+
+pub use self::methods::HttpMethod;
+pub use self::response::HttpResponse;
+pub use self::status::HttpStatus;
+
 use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum HttpMethod {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    PATCH,
-    HEAD,
-    OPTIONS,
-    TRACE,
-    CONNECT,
-    Other(String),
-}
-
-impl HttpMethod {
-    pub fn from_str(method: &str) -> HttpMethod {
-        match method {
-            "GET" => HttpMethod::GET,
-            "POST" => HttpMethod::POST,
-            "PUT" => HttpMethod::PUT,
-            "DELETE" => HttpMethod::DELETE,
-            "PATCH" => HttpMethod::PATCH,
-            "HEAD" => HttpMethod::HEAD,
-            "OPTIONS" => HttpMethod::OPTIONS,
-            "TRACE" => HttpMethod::TRACE,
-            "CONNECT" => HttpMethod::CONNECT,
-            _ => Self::Other(method.to_string()),
-        }
-    }
-    pub fn to_str(&self) -> &str {
-        match self {
-            HttpMethod::GET => "GET",
-            HttpMethod::POST => "POST",
-            HttpMethod::PUT => "PUT",
-            HttpMethod::DELETE => "DELETE",
-            HttpMethod::PATCH => "PATCH",
-            HttpMethod::HEAD => "HEAD",
-            HttpMethod::OPTIONS => "OPTIONS",
-            HttpMethod::TRACE => "TRACE",
-            HttpMethod::CONNECT => "CONNECT",
-            HttpMethod::Other(method) => method.as_str(),
-        }
-    }
-}
 
 #[macro_export]
 macro_rules! headers {
@@ -66,77 +29,6 @@ macro_rules! headers {
             Some(headers)
         }
     };
-}
-
-#[derive(Clone, Copy)]
-pub enum Protocol {
-    HTTP,
-    HTTPS,
-}
-
-#[derive(Clone, Copy)]
-pub enum HttpStatus {
-    OK = 200,
-    Created = 201,
-    Accepted = 202,
-    NoContent = 204,
-    MovedPermanently = 301,
-    MovedTemporarily = 302,
-    NotModified = 304,
-    BadRequest = 400,
-    Unauthorized = 401,
-    Forbidden = 403,
-    NotFound = 404,
-    IAmATeapot = 418,
-    InternalServerError = 500,
-    NotImplemented = 501,
-    BadGateway = 502,
-    ServiceUnavailable = 503,
-}
-
-impl HttpStatus {
-    pub fn from_u16(status: u16) -> HttpStatus {
-        match status {
-            200 => HttpStatus::OK,
-            201 => HttpStatus::Created,
-            202 => HttpStatus::Accepted,
-            204 => HttpStatus::NoContent,
-            301 => HttpStatus::MovedPermanently,
-            302 => HttpStatus::MovedTemporarily,
-            304 => HttpStatus::NotModified,
-            400 => HttpStatus::BadRequest,
-            401 => HttpStatus::Unauthorized,
-            403 => HttpStatus::Forbidden,
-            404 => HttpStatus::NotFound,
-            418 => HttpStatus::IAmATeapot,
-            500 => HttpStatus::InternalServerError,
-            501 => HttpStatus::NotImplemented,
-            502 => HttpStatus::BadGateway,
-            503 => HttpStatus::ServiceUnavailable,
-            _ => panic!("Invalid HTTP status"),
-        }
-    }
-
-    fn to_string(&self) -> &str {
-        match self {
-            HttpStatus::OK => "OK",
-            HttpStatus::Created => "Created",
-            HttpStatus::Accepted => "Accepted",
-            HttpStatus::NoContent => "No Content",
-            HttpStatus::MovedPermanently => "Moved Permanently",
-            HttpStatus::MovedTemporarily => "Moved Temporarily",
-            HttpStatus::NotModified => "Not Modified",
-            HttpStatus::BadRequest => "Bad Request",
-            HttpStatus::Unauthorized => "Unauthorized",
-            HttpStatus::Forbidden => "Forbidden",
-            HttpStatus::NotFound => "Not Found",
-            HttpStatus::IAmATeapot => "I'm a teapot",
-            HttpStatus::InternalServerError => "Internal Server Error",
-            HttpStatus::NotImplemented => "Not Implemented",
-            HttpStatus::BadGateway => "Bad Gateway",
-            HttpStatus::ServiceUnavailable => "Service Unavailable",
-        }
-    }
 }
 
 pub struct HttpRequest {
@@ -151,40 +43,44 @@ pub struct Hteapot {
     port: u16,
     address: String,
     threads: u16,
-    //cache: HashMap<String,String>,
-    //pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
 }
 
 #[derive(Clone, Debug)]
 struct SocketStatus {
+    // TODO: write proper ttl
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
     index_writed: usize,
 }
 
+struct SocketData {
+    stream: TcpStream,
+    status: Option<SocketStatus>,
+}
+
 impl Hteapot {
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
         Hteapot {
-            port: port,
+            port,
             address: address.to_string(),
             threads: 1,
             //cache: HashMap::new(),
         }
     }
 
-    pub fn new_threaded(address: &str, port: u16, thread: u16) -> Self {
+    pub fn new_threaded(address: &str, port: u16, threads: u16) -> Self {
         Hteapot {
-            port: port,
+            port,
             address: address.to_string(),
-            threads: thread,
+            threads: if threads == 0 { 1 } else { threads },
             //cache: HashMap::new(),
         }
     }
 
     // Start the server
-    pub fn listen(&self, action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static) {
+    pub fn listen(&self, action: impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static) {
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -197,54 +93,84 @@ impl Hteapot {
         let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
         //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
+        let priority_list: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
         let arc_action = Arc::new(action);
-
         for _tn in 0..self.threads {
+            let _tn = _tn as usize;
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
+            let pl_clone = priority_list.clone();
+            {
+                let mut pl_lock = pl_clone.lock().expect("Error locking prority list");
+                pl_lock.push(0);
+            }
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
-                let mut streams_data: HashMap<String, SocketStatus> = HashMap::new();
                 loop {
                     {
                         let (lock, cvar) = &*pool_clone;
                         let mut pool = lock.lock().expect("Error locking pool");
+                        let pl_copy;
+                        {
+                            let pl_lock = pl_clone.lock().expect("Error locking prority list");
+                            pl_copy = pl_lock.clone();
+                        }
+
                         if streams_to_handle.is_empty() {
                             pool = cvar
                                 .wait_while(pool, |pool| pool.is_empty())
                                 .expect("Error waiting on cvar");
+                        } else if pl_copy.len() != 1
+                            && streams_to_handle.len() < 10
+                            && pl_copy
+                                .iter()
+                                .find(|&&v| streams_to_handle.len() > v)
+                                .is_none()
+                        {
+                            (pool, _) = cvar
+                                .wait_timeout_while(pool, Duration::from_millis(500), |pool| {
+                                    pool.is_empty()
+                                })
+                                .expect("Error waiting on cvar");
                         }
 
                         if !pool.is_empty() {
-                            streams_to_handle.push(pool.pop_back().unwrap());
-                        }
-                    }
-
-                    streams_to_handle.retain(|stream| {
-                        //println!("Handling request by {}", tn);
-                        let local_addr = stream.local_addr().unwrap().to_string();
-                        let action_clone = action_clone.clone();
-                        let status = match streams_data.get(&local_addr) {
-                            Some(d) => d.clone(),
-                            None => SocketStatus {
+                            let socket_status = SocketStatus {
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
                                 index_writed: 0,
-                            },
-                        };
+                            };
+                            let socket_data = SocketData {
+                                stream: pool.pop_back().unwrap(),
+                                status: Some(socket_status),
+                            };
+                            streams_to_handle.push(socket_data);
 
-                        let r = Hteapot::handle_client(stream, status, move |request| {
-                            action_clone(request)
-                        });
-                        if r.is_some() {
-                            streams_data.insert(local_addr, r.unwrap());
-                            return true;
-                        } else {
-                            streams_data.remove(&local_addr);
-                            return false;
+                            {
+                                let mut pl_lock =
+                                    pl_clone.lock().expect("Errpr locking prority list");
+                                pl_lock[_tn] = streams_to_handle.len();
+                            }
                         }
-                    });
+                    }
+
+                    for stream_data in streams_to_handle.iter_mut() {
+                        if stream_data.status.is_none() {
+                            continue;
+                        }
+                        let r = Hteapot::handle_client(
+                            &stream_data.stream,
+                            stream_data.status.as_mut().unwrap().clone(),
+                            &action_clone,
+                        );
+                        stream_data.status = r;
+                    }
+                    streams_to_handle.retain(|s| s.status.is_some());
+                    {
+                        let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+                        pl_lock[_tn] = streams_to_handle.len();
+                    }
                 }
             });
         }
@@ -259,7 +185,7 @@ impl Hteapot {
             stream
                 .set_nonblocking(true)
                 .expect("Error seting non blocking");
-            //stream.set_nodelay(true).expect("Error seting no delay");
+            stream.set_nodelay(true).expect("Error seting no delay");
             {
                 let (lock, cvar) = &*pool_clone;
                 let mut pool = lock.lock().expect("Error locking pool");
@@ -271,45 +197,12 @@ impl Hteapot {
         }
     }
 
-    // Create a response
-    pub fn response_maker<B: AsRef<[u8]>>(
-        status: HttpStatus,
-        content: B,
-        headers: Option<HashMap<String, String>>,
-    ) -> Vec<u8> {
-        let content = content.as_ref();
-        let status_text = status.to_string();
-        let mut headers_text = String::new();
-        let mut headers = if headers.is_some() {
-            headers.unwrap()
-        } else {
-            HashMap::new()
-        };
-        headers.insert("Content-Length".to_string(), content.len().to_string());
-        headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
-        for (key, value) in headers.iter() {
-            headers_text.push_str(&format!("{}: {}\r\n", key, value));
-        }
-        let response_header = format!(
-            "HTTP/1.1 {} {}\r\n{}\r\n",
-            status as u16, status_text, headers_text
-        );
-        let mut response = Vec::new();
-        response.extend_from_slice(response_header.as_bytes());
-        response.extend_from_slice(content);
-        response.push(0x0D); // Carriage Return
-        response.push(0x0A); // Line Feed
-        response
-    }
-
     // Parse the request
     pub fn request_parser(request: String) -> Result<HttpRequest, String> {
         let mut lines = request.lines();
         let first_line = lines.next();
         if first_line.is_none() {
+            println!("{}", request);
             return Err("Invalid request".to_string());
         }
         let first_line = first_line.unwrap();
@@ -379,8 +272,8 @@ impl Hteapot {
         Ok(HttpRequest {
             method: HttpMethod::from_str(method),
             path: path.to_string(),
-            args: args,
-            headers: headers,
+            args,
+            headers,
             body: body.trim_end().to_string(),
         })
     }
@@ -389,7 +282,7 @@ impl Hteapot {
     fn handle_client(
         stream: &TcpStream,
         socket_status: SocketStatus,
-        action: impl Fn(HttpRequest) -> Vec<u8> + Send + Sync + 'static,
+        action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
     ) -> Option<SocketStatus> {
         let mut reader = BufReader::new(stream);
         let mut writer = BufWriter::new(stream);
@@ -402,6 +295,9 @@ impl Hteapot {
                         io::ErrorKind::WouldBlock => {
                             return Some(socket_status);
                         }
+                        io::ErrorKind::ConnectionReset => {
+                            return None;
+                        }
                         _ => {
                             println!("R Error{:?}", e);
                             return None;
@@ -409,7 +305,7 @@ impl Hteapot {
                     },
                     Ok(m) => {
                         if m == 0 {
-                            break;
+                            return None;
                         }
                     }
                 };
@@ -433,8 +329,22 @@ impl Hteapot {
             return None;
         }
         let request = request.unwrap();
+        let keep_alive = match request.headers.get("Connection") {
+            Some(ch) => ch == "keep-alive",
+            None => false,
+        };
         if socket_status.data_write.len() == 0 {
-            socket_status.data_write = action(request);
+            let mut response = action(request);
+            if !response.headers.contains_key("Conection") && keep_alive {
+                response
+                    .headers
+                    .insert("Connection".to_string(), "keep_alive".to_string());
+            } else {
+                response
+                    .headers
+                    .insert("Connection".to_string(), "close".to_string());
+            }
+            socket_status.data_write = response.to_bytes();
         }
         for n in socket_status.index_writed..socket_status.data_write.len() {
             let r = writer.write(&[socket_status.data_write[n]]);
@@ -455,8 +365,16 @@ impl Hteapot {
             eprintln!("Error2: {}", r.err().unwrap());
             return Some(socket_status);
         }
-        let _ = stream.shutdown(Shutdown::Both);
-        None
+        if keep_alive {
+            socket_status.reading = true;
+            socket_status.data_readed = vec![];
+            socket_status.data_write = vec![];
+            socket_status.index_writed = 0;
+            return Some(socket_status);
+        } else {
+            let _ = stream.shutdown(Shutdown::Both);
+            None
+        }
     }
 }
 
@@ -475,8 +393,8 @@ fn test_http_parser() {
 
 #[test]
 fn test_http_response_maker() {
-    let response = Hteapot::response_maker(HttpStatus::IAmATeapot, "Hello, World!", None);
-    let response = String::from_utf8(response).unwrap();
+    let response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
+    let response = String::from_utf8(response.to_bytes()).unwrap();
     let expected_response = format!("HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",VERSION);
     let expected_response_list = expected_response.split("\r\n");
     for item in expected_response_list.into_iter() {
