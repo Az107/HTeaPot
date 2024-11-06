@@ -6,6 +6,7 @@ use std::{
     net::TcpStream,
 };
 
+#[derive(Debug)]
 struct Url {
     scheme: String,
     domain: String,
@@ -27,7 +28,11 @@ fn parse_url(url: &str) -> Result<Url, &str> {
             _ => "80",
         }
     };
-    let (domain, path) = domain_path.split_once('/').unwrap();
+    let (domain, path) = match domain_path.split_once('/') {
+        Some((a, b)) => (a, b),
+        None => (domain_path, ""),
+    };
+
     Ok(Url {
         scheme: prefix.to_string(),
         domain: domain.to_string(),
@@ -51,21 +56,19 @@ pub fn fetch(url: &str) -> Result<Vec<u8>, &str> {
         return Err("Error fetching");
     }
     let mut client = client.unwrap();
-    let http_request = format!("GET /{} HTTP/1.1\r\nHost: {}\r\n\r\n", url.path, url.domain);
+    let http_request = format!(
+        "GET /{} HTTP/1.1\nHost: {}\nConnection: Close\n\n",
+        url.path, url.domain
+    );
     client.write(http_request.as_bytes()).unwrap();
+    let _ = client.flush();
     let mut full_buffer: Vec<u8> = Vec::new();
     let mut buffer = [0; 1024];
     loop {
         match client.read(&mut buffer) {
             Ok(0) => break,
-            Ok(n) => {
-                if n == 0 {
-                    break;
-                }
+            Ok(_n) => {
                 full_buffer.extend(buffer.iter().cloned());
-                if buffer.last().unwrap() == &0 {
-                    break;
-                }
             }
             Err(_) => break,
         }

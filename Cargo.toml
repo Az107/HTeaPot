@@ -1,6 +1,6 @@
 [package]
 name = "hteapot"
-version = "0.2.7"
+version = "0.3.0"
 exclude = ["hteapot.toml", "public/", "readme.md"]
 license = "MIT"
 keywords = ["HTTP", "HTTP-SERVER"]
@@ -13,7 +13,7 @@ authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
 [lib]
 name = "hteapot"
-path = "src/hteapot.rs"
+path = "src/hteapot/mod.rs"
 
 [[bin]]
 name = "hteapot"

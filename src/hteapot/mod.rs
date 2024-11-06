@@ -2,59 +2,22 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
+mod methods;
+mod response;
+mod status;
+
+pub use self::methods::HttpMethod;
+pub use self::response::HttpResponse;
+pub use self::status::HttpStatus;
+
 use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum HttpMethod {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    PATCH,
-    HEAD,
-    OPTIONS,
-    TRACE,
-    CONNECT,
-    Other(String),
-}
-
-impl HttpMethod {
-    pub fn from_str(method: &str) -> HttpMethod {
-        match method {
-            "GET" => HttpMethod::GET,
-            "POST" => HttpMethod::POST,
-            "PUT" => HttpMethod::PUT,
-            "DELETE" => HttpMethod::DELETE,
-            "PATCH" => HttpMethod::PATCH,
-            "HEAD" => HttpMethod::HEAD,
-            "OPTIONS" => HttpMethod::OPTIONS,
-            "TRACE" => HttpMethod::TRACE,
-            "CONNECT" => HttpMethod::CONNECT,
-            _ => Self::Other(method.to_string()),
-        }
-    }
-    pub fn to_str(&self) -> &str {
-        match self {
-            HttpMethod::GET => "GET",
-            HttpMethod::POST => "POST",
-            HttpMethod::PUT => "PUT",
-            HttpMethod::DELETE => "DELETE",
-            HttpMethod::PATCH => "PATCH",
-            HttpMethod::HEAD => "HEAD",
-            HttpMethod::OPTIONS => "OPTIONS",
-            HttpMethod::TRACE => "TRACE",
-            HttpMethod::CONNECT => "CONNECT",
-            HttpMethod::Other(method) => method.as_str(),
-        }
-    }
-}
 
 #[macro_export]
 macro_rules! headers {
@@ -68,77 +31,6 @@ macro_rules! headers {
     };
 }
 
-#[derive(Clone, Copy)]
-pub enum Protocol {
-    HTTP,
-    HTTPS,
-}
-
-#[derive(Clone, Copy)]
-pub enum HttpStatus {
-    OK = 200,
-    Created = 201,
-    Accepted = 202,
-    NoContent = 204,
-    MovedPermanently = 301,
-    MovedTemporarily = 302,
-    NotModified = 304,
-    BadRequest = 400,
-    Unauthorized = 401,
-    Forbidden = 403,
-    NotFound = 404,
-    IAmATeapot = 418,
-    InternalServerError = 500,
-    NotImplemented = 501,
-    BadGateway = 502,
-    ServiceUnavailable = 503,
-}
-
-impl HttpStatus {
-    pub fn from_u16(status: u16) -> HttpStatus {
-        match status {
-            200 => HttpStatus::OK,
-            201 => HttpStatus::Created,
-            202 => HttpStatus::Accepted,
-            204 => HttpStatus::NoContent,
-            301 => HttpStatus::MovedPermanently,
-            302 => HttpStatus::MovedTemporarily,
-            304 => HttpStatus::NotModified,
-            400 => HttpStatus::BadRequest,
-            401 => HttpStatus::Unauthorized,
-            403 => HttpStatus::Forbidden,
-            404 => HttpStatus::NotFound,
-            418 => HttpStatus::IAmATeapot,
-            500 => HttpStatus::InternalServerError,
-            501 => HttpStatus::NotImplemented,
-            502 => HttpStatus::BadGateway,
-            503 => HttpStatus::ServiceUnavailable,
-            _ => panic!("Invalid HTTP status"),
-        }
-    }
-
-    fn to_string(&self) -> &str {
-        match self {
-            HttpStatus::OK => "OK",
-            HttpStatus::Created => "Created",
-            HttpStatus::Accepted => "Accepted",
-            HttpStatus::NoContent => "No Content",
-            HttpStatus::MovedPermanently => "Moved Permanently",
-            HttpStatus::MovedTemporarily => "Moved Temporarily",
-            HttpStatus::NotModified => "Not Modified",
-            HttpStatus::BadRequest => "Bad Request",
-            HttpStatus::Unauthorized => "Unauthorized",
-            HttpStatus::Forbidden => "Forbidden",
-            HttpStatus::NotFound => "Not Found",
-            HttpStatus::IAmATeapot => "I'm a teapot",
-            HttpStatus::InternalServerError => "Internal Server Error",
-            HttpStatus::NotImplemented => "Not Implemented",
-            HttpStatus::BadGateway => "Bad Gateway",
-            HttpStatus::ServiceUnavailable => "Service Unavailable",
-        }
-    }
-}
-
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
@@ -147,79 +39,10 @@ pub struct HttpRequest {
     pub body: String,
 }
 
-pub struct HttpResponse {
-    pub status: HttpStatus,
-    pub headers: HashMap<String, String>,
-    pub content: Vec<u8>,
-    raw: Option<Vec<u8>>,
-    is_raw: bool,
-}
-
-impl HttpResponse {
-    pub fn new<B: AsRef<[u8]>>(
-        status: HttpStatus,
-        content: B,
-        headers: Option<HashMap<String, String>>,
-    ) -> Self {
-        let mut headers = headers.unwrap_or(HashMap::new());
-        let content = content.as_ref();
-        headers.insert("Content-Length".to_string(), content.len().to_string());
-        headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
-        HttpResponse {
-            status,
-            headers,
-            content: content.to_owned(),
-            raw: None,
-            is_raw: false,
-        }
-    }
-
-    pub fn new_raw(raw: Vec<u8>) -> Self {
-        HttpResponse {
-            status: HttpStatus::IAmATeapot,
-            headers: HashMap::new(),
-            content: vec![],
-            raw: Some(raw),
-            is_raw: true,
-        }
-    }
-
-    pub fn is_raw(&self) -> bool {
-        self.is_raw
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        if self.is_raw() {
-            return self.raw.clone().unwrap();
-        }
-        let mut headers_text = String::new();
-        for (key, value) in self.headers.iter() {
-            headers_text.push_str(&format!("{}: {}\r\n", key, value));
-        }
-        let response_header = format!(
-            "HTTP/1.1 {} {}\r\n{}\r\n",
-            self.status as u16,
-            self.status.to_string(),
-            headers_text
-        );
-        let mut response = Vec::new();
-        response.extend_from_slice(response_header.as_bytes());
-        response.append(&mut self.content.clone());
-        response.push(0x0D); // Carriage Return
-        response.push(0x0A); // Line Feed
-        response
-    }
-}
-
 pub struct Hteapot {
     port: u16,
     address: String,
     threads: u16,
-    //cache: HashMap<String,String>,
-    //pool: Arc<(Mutex<Vec<TcpStream>>, Condvar)>,
 }
 
 #[derive(Clone, Debug)]
@@ -278,7 +101,7 @@ impl Hteapot {
             let action_clone = arc_action.clone();
             let pl_clone = priority_list.clone();
             {
-                let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+                let mut pl_lock = pl_clone.lock().expect("Error locking prority list");
                 pl_lock.push(0);
             }
             thread::spawn(move || {
@@ -289,18 +112,25 @@ impl Hteapot {
                         let mut pool = lock.lock().expect("Error locking pool");
                         let pl_copy;
                         {
-                            let pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+                            let pl_lock = pl_clone.lock().expect("Error locking prority list");
                             pl_copy = pl_lock.clone();
                         }
-                        if streams_to_handle.is_empty()
-                            || streams_to_handle.len() < 10
-                                && pl_copy
-                                    .iter()
-                                    .find(|&&v| streams_to_handle.len() > v)
-                                    .is_none()
-                        {
+
+                        if streams_to_handle.is_empty() {
                             pool = cvar
                                 .wait_while(pool, |pool| pool.is_empty())
+                                .expect("Error waiting on cvar");
+                        } else if pl_copy.len() != 1
+                            && streams_to_handle.len() < 10
+                            && pl_copy
+                                .iter()
+                                .find(|&&v| streams_to_handle.len() > v)
+                                .is_none()
+                        {
+                            (pool, _) = cvar
+                                .wait_timeout_while(pool, Duration::from_millis(500), |pool| {
+                                    pool.is_empty()
+                                })
                                 .expect("Error waiting on cvar");
                         }
 
@@ -442,8 +272,8 @@ impl Hteapot {
         Ok(HttpRequest {
             method: HttpMethod::from_str(method),
             path: path.to_string(),
-            args: args,
-            headers: headers,
+            args,
+            headers,
             body: body.trim_end().to_string(),
         })
     }
@@ -464,6 +294,9 @@ impl Hteapot {
                     Err(e) => match e.kind() {
                         io::ErrorKind::WouldBlock => {
                             return Some(socket_status);
+                        }
+                        io::ErrorKind::ConnectionReset => {
+                            return None;
                         }
                         _ => {
                             println!("R Error{:?}", e);
@@ -502,7 +335,7 @@ impl Hteapot {
         };
         if socket_status.data_write.len() == 0 {
             let mut response = action(request);
-            if keep_alive {
+            if !response.headers.contains_key("Conection") && keep_alive {
                 response
                     .headers
                     .insert("Connection".to_string(), "keep_alive".to_string());

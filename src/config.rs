@@ -96,6 +96,7 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
     map
 }
 
+#[derive(Debug)]
 pub struct Config {
     pub port: u16,    // Port number to listen
     pub host: String, // Host name or IP
