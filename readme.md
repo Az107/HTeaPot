@@ -49,11 +49,15 @@ For use hteapot as a library in rust
 
  2. Then you can use it in your project
 ```Rust
-use hteapot::{HttpStatus, Hteapot};
+use hteapot::{HttpStatus, Hteapot, HttpRequest};
 
 fn main() {
     let server = Hteapot::new("localhost", 8081);
      teapot.listen(move|req| {
+       HttpResponse::new(HttpStatus::IAmATeapot, "Hello i am HTeaPot", None);
+
+     }
+
 }
 ```
 
