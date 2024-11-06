@@ -1,19 +1,87 @@
-<!doctype html>
-<html>
-    <head>
-        <title>HTeaPot Server</title>
-        <script src="index.js"></script>
-    </head>
-    <body>
-        <h1>HTeaPot Server</h1>
-        <p>
-            Congratulations! HTeaPot, the HTTP server, is correctly installed
-            and configured.
-        </p>
-        <p>You are now ready to serve your web applications.</p>
-        <button onclick="brew()">Brew!</button>
-        <br />
-        <br />
-        <img src="favicon.ico" alt="tea" />
-    </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTeaPot Server</title>
+  <style>
+    body {
+        font-family: Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        background-color: #f0f0f0;
+        margin: 0;
+    }
+
+    .container {
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      text-align: center;
+      width: 300px;
+    }
+
+    h1 {
+      font-size:24px;
+      margin: 10px 0;
+    }
+
+    p {
+      color: #555;
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 10px 15px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    .image-container {
+      margin-top: 15px;
+    }
+
+    img {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      margin-top: 10px;
+    }
+
+    .app-info {
+      margin-top: 20px;
+      text-align: center;
+    }
+
+  </style>
+ <script src="index.js"></script>
+</head>
+
+<body>
+
+  <div class="container">
+    <h1>HTeaPot Server</h1>
+    <p>Congratulations! HTeaPot, the HTTP server, is correctly installed and configured.</p>
+    <p>You are now ready to serve your web applications.</p>
+    <button onclick="brew()">Brew!</button>
+  </div>
+
+  <div class="app-info">
+    <div class="image-container">
+      <img src="favicon.ico" alt="tea"/>
+    </div>
+  </div>
+</body>
 </html>
