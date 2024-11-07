@@ -44,12 +44,7 @@ fn serve_proxy(proxy_url: String) -> HttpResponse {
     }
 }
 
-fn get_mime_tipe(config: &Config, path: String) -> String {
-    let mut path = format!("{}{}", config.root, path);
-    if Path::new(path.as_str()).is_dir() {
-        let separator = if path.ends_with('/') { "" } else { "/" };
-        path = format!("{}{}{}", path, separator, config.index);
-    }
+fn get_mime_tipe(path: &String) -> String {
     let extension = Path::new(path.as_str())
         .extension()
         .unwrap()
@@ -60,18 +55,14 @@ fn get_mime_tipe(config: &Config, path: String) -> String {
         "json" => "application/json",
         "css" => "text/css",
         "html" => "text/html",
+        "ico" => "image/x-icon",
         _ => "text/plain",
     };
 
     mimetipe.to_string()
 }
 
-fn serve_file(config: &Config, path: String) -> Option<Vec<u8>> {
-    let mut path = format!("{}{}", config.root, path);
-    if Path::new(path.as_str()).is_dir() {
-        let separator = if path.ends_with('/') { "" } else { "/" };
-        path = format!("{}{}{}", path, separator, config.index);
-    }
+fn serve_file(path: &String) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() {
         Some(r.unwrap())
@@ -166,22 +157,32 @@ fn main() {
         if proxy_only || is_proxy.is_some() {
             return serve_proxy(is_proxy.unwrap());
         }
-        if !Path::new(req.path.clone().as_str()).exists() {
+
+        let mut full_path = format!("{}{}", config.root, req.path.clone());
+        if Path::new(full_path.as_str()).is_dir() {
+            let separator = if full_path.ends_with('/') { "" } else { "/" };
+            full_path = format!("{}{}{}", full_path, separator, config.index);
+        }
+        if !Path::new(full_path.as_str()).exists() {
+            logger
+                .lock()
+                .expect("this doesnt work :C")
+                .msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
-        let mimetype = get_mime_tipe(&config, req.path.clone());
+        let mimetype = get_mime_tipe(&full_path);
         let content: Option<Vec<u8>> = if config.cache {
             let mut cachee = cache.lock().expect("Error locking cache");
             let mut r = cachee.get(req.path.clone());
             if r.is_none() {
-                r = serve_file(&config, req.path.clone());
+                r = serve_file(&full_path);
                 if r.is_some() {
                     cachee.set(req.path.clone(), r.clone().unwrap());
                 }
             }
             r
         } else {
-            serve_file(&config, req.path)
+            serve_file(&full_path)
         };
         match content {
             Some(c) => HttpResponse::new(HttpStatus::OK, c, headers!("Content-Type" => mimetype)),
