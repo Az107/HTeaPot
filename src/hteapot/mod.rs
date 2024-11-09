@@ -221,7 +221,7 @@ impl Hteapot {
             return Some(());
         }
         let request = request.unwrap();
-
+        println!("{:?}", request);
         let keep_alive = request
             .headers
             .get("Connection")

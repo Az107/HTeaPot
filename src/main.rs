@@ -7,6 +7,7 @@ mod utils;
 use std::{fs, io};
 
 use std::path::Path;
+use std::process::Command;
 
 use std::sync::Mutex;
 
@@ -44,6 +45,15 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
 fn serve_file(path: &String) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() { Some(r.unwrap()) } else { None }
+}
+
+#[cfg(feature = "cgi")]
+fn serve_cgi(program: &String, path: &String) -> Result<Vec<u8>, &'static str> {
+    let output = Command::new(program).arg(&path).output();
+    match output {
+        Ok(output) => Ok(output.stdout),
+        Err(_) => Err("Error runing command"),
+    }
 }
 
 fn main() {
@@ -144,6 +154,28 @@ fn main() {
             logger.msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
+
+        #[cfg(feature = "cgi")]
+        {
+            let extension = Path::new(&full_path).extension().unwrap();
+            let extension = extension.to_str().unwrap();
+            println!("File extension: {}", extension);
+            let cgi_command = config.cgi_rules.get(extension);
+            if cgi_command.is_some() {
+                let cgi_command = cgi_command.unwrap();
+                logger.msg(format!("Runing {} {}", cgi_command, full_path));
+                let cgi_result = serve_cgi(cgi_command, &full_path);
+                return match cgi_result {
+                    Ok(result) => HttpResponse::new(HttpStatus::OK, result, None),
+                    Err(_) => HttpResponse::new(
+                        HttpStatus::InternalServerError,
+                        "Internal server error",
+                        None,
+                    ),
+                };
+            }
+        }
+
         let mimetype = get_mime_tipe(&full_path);
         let content: Option<Vec<u8>> = if config.cache {
             let mut cachee = cache.lock().expect("Error locking cache");

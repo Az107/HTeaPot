@@ -1,6 +1,7 @@
 use super::HttpMethod;
 use std::{collections::HashMap, net::TcpStream, str};
 
+#[derive(Debug)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
@@ -158,7 +159,7 @@ impl HttpRequestBuilder {
                         .collect();
                 }
             } else if !line_str.is_empty() {
-                if let Some((key, value)) = line_str.split_once(": ") {
+                if let Some((key, value)) = line_str.split_once(":") {
                     if key.to_lowercase() == "content-length" {
                         self.body_size = value.parse().unwrap_or(0);
                     }

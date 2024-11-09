@@ -10,3 +10,5 @@ cache_ttl = 36
 "/google" = "http://google.com"
 "/myip" = "http://ifconfig.co"
 # "/" = "http://ifconfig.co" # this will override all the proxys and local request
+[cgi]
+"sh" = "bash"
