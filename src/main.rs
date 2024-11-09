@@ -7,6 +7,7 @@ mod logger;
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Mutex;
 
 use brew::fetch;
@@ -20,7 +21,11 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn is_proxy(config: &Config, path: String) -> Option<String> {
     for proxy_path in config.proxy_rules.keys() {
-        let path_proxy = path.strip_prefix(proxy_path);
+        let mut proxy_path_f = proxy_path.clone();
+        if !proxy_path.ends_with("/") {
+            proxy_path_f = format!("{}/", proxy_path);
+        }
+        let path_proxy = path.strip_prefix(&proxy_path_f);
         if path_proxy.is_some() {
             let path_proxy = path_proxy.unwrap();
             let url = config.proxy_rules.get(proxy_path).unwrap();
@@ -68,6 +73,15 @@ fn serve_file(path: &String) -> Option<Vec<u8>> {
         Some(r.unwrap())
     } else {
         None
+    }
+}
+
+#[cfg(feature = "cgi")]
+fn serve_cgi(program: &String, path: &String) -> Result<Vec<u8>, &'static str> {
+    let output = Command::new(program).arg(&path).output();
+    match output {
+        Ok(output) => Ok(output.stdout),
+        Err(_) => Err("Error runing command"),
     }
 }
 
@@ -152,12 +166,6 @@ fn main() {
             req.path
         ));
 
-        let is_proxy = is_proxy(&config, req.path.clone());
-
-        if proxy_only || is_proxy.is_some() {
-            return serve_proxy(is_proxy.unwrap());
-        }
-
         let mut full_path = format!("{}{}", config.root, req.path.clone());
         if Path::new(full_path.as_str()).is_dir() {
             let separator = if full_path.ends_with('/') { "" } else { "/" };
@@ -170,6 +178,35 @@ fn main() {
                 .msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
+        let is_proxy = is_proxy(&config, req.path.clone());
+        if proxy_only || is_proxy.is_some() {
+            return serve_proxy(is_proxy.unwrap());
+        }
+
+        #[cfg(feature = "cgi")]
+        {
+            let extension = Path::new(&full_path).extension().unwrap();
+            let extension = extension.to_str().unwrap();
+            println!("File extension: {}", extension);
+            let cgi_command = config.cgi_rules.get(extension);
+            if cgi_command.is_some() {
+                let cgi_command = cgi_command.unwrap();
+                logger
+                    .lock()
+                    .expect("this doesnt work :C")
+                    .msg(format!("Runing {} {}", cgi_command, full_path));
+                let cgi_result = serve_cgi(cgi_command, &full_path);
+                return match cgi_result {
+                    Ok(result) => HttpResponse::new(HttpStatus::OK, result, None),
+                    Err(_) => HttpResponse::new(
+                        HttpStatus::InternalServerError,
+                        "Internal server error",
+                        None,
+                    ),
+                };
+            }
+        }
+
         let mimetype = get_mime_tipe(&full_path);
         let content: Option<Vec<u8>> = if config.cache {
             let mut cachee = cache.lock().expect("Error locking cache");

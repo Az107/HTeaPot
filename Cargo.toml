@@ -11,6 +11,11 @@ readme = "readme.md"
 categories = ["network-programming", "web-programming"]
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
+
+[features]
+default = ["cgi"]
+cgi = []
+
 [lib]
 name = "hteapot"
 path = "src/hteapot/mod.rs"
