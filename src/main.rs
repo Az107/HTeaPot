@@ -25,6 +25,7 @@ fn is_proxy(config: &Config, path: String) -> Option<String> {
         if !proxy_path.ends_with("/") {
             proxy_path_f = format!("{}/", proxy_path);
         }
+        println!("{} -- {}", proxy_path_f, path);
         let path_proxy = path.strip_prefix(&proxy_path_f);
         if path_proxy.is_some() {
             let path_proxy = path_proxy.unwrap();
@@ -171,16 +172,18 @@ fn main() {
             let separator = if full_path.ends_with('/') { "" } else { "/" };
             full_path = format!("{}{}{}", full_path, separator, config.index);
         }
+
+        let is_proxy = is_proxy(&config, req.path.clone());
+        if proxy_only || is_proxy.is_some() {
+            return serve_proxy(is_proxy.unwrap());
+        }
+
         if !Path::new(full_path.as_str()).exists() {
             logger
                 .lock()
                 .expect("this doesnt work :C")
                 .msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
-        }
-        let is_proxy = is_proxy(&config, req.path.clone());
-        if proxy_only || is_proxy.is_some() {
-            return serve_proxy(is_proxy.unwrap());
         }
 
         #[cfg(feature = "cgi")]
