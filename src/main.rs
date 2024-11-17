@@ -77,7 +77,23 @@ use crate::utils::Context;
 /// - HTTP server via [`Hteapot::new_threaded`](crate::hteapot::Hteapot::new_threaded)
 
 #[cfg(feature = "cgi")]
-fn serve_cgi(program: &String, path: &String) -> Result<Vec<u8>, &'static str> {
+
+fn serve_cgi(
+    program: &String,
+    path: &String,
+    request: HttpRequest,
+) -> Result<Vec<u8>, &'static str> {
+    use std::env;
+
+    env::set_var("REQUEST_METHOD", request.method.to_str()); // Método HTTP de la petición
+    env::set_var("QUERY_STRING", "nombre=Alb&edad=30"); // Cadena de consulta para GET
+    let content_type = request.headers.get("CONTENT_TYPE");
+    let content_type = match content_type {
+        Some(s) => s.clone(),
+        None => "".to_string(),
+    };
+    env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
+    env::set_var("CONTENT_LENGTH", ""); // Longitud del contenido para POST
     let output = Command::new(program).arg(&path).output();
     match output {
         Ok(output) => Ok(output.stdout),
