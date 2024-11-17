@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use brew::fetch;
 use cache::Cache;
 use config::Config;
-use hteapot::{Hteapot, HttpResponse, HttpStatus};
+use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 
 use logger::Logger;
 
@@ -78,7 +78,23 @@ fn serve_file(path: &String) -> Option<Vec<u8>> {
 }
 
 #[cfg(feature = "cgi")]
-fn serve_cgi(program: &String, path: &String) -> Result<Vec<u8>, &'static str> {
+
+fn serve_cgi(
+    program: &String,
+    path: &String,
+    request: HttpRequest,
+) -> Result<Vec<u8>, &'static str> {
+    use std::env;
+
+    env::set_var("REQUEST_METHOD", request.method.to_str()); // Método HTTP de la petición
+    env::set_var("QUERY_STRING", "nombre=Alb&edad=30"); // Cadena de consulta para GET
+    let content_type = request.headers.get("CONTENT_TYPE");
+    let content_type = match content_type {
+        Some(s) => s.clone(),
+        None => "".to_string(),
+    };
+    env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
+    env::set_var("CONTENT_LENGTH", ""); // Longitud del contenido para POST
     let output = Command::new(program).arg(&path).output();
     match output {
         Ok(output) => Ok(output.stdout),
@@ -198,7 +214,7 @@ fn main() {
                     .lock()
                     .expect("this doesnt work :C")
                     .msg(format!("Runing {} {}", cgi_command, full_path));
-                let cgi_result = serve_cgi(cgi_command, &full_path);
+                let cgi_result = serve_cgi(cgi_command, &full_path, req);
                 return match cgi_result {
                     Ok(result) => HttpResponse::new(HttpStatus::OK, result, None),
                     Err(_) => HttpResponse::new(
