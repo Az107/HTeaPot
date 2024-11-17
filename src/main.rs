@@ -84,7 +84,9 @@ fn serve_cgi(
     path: &String,
     request: HttpRequest,
 ) -> Result<Vec<u8>, &'static str> {
-    use std::env;
+    use std::{env, io::Write, process::Stdio};
+
+    use hteapot::HttpMethod;
 
     env::set_var("REQUEST_METHOD", request.method.to_str()); // Método HTTP de la petición
     env::set_var("QUERY_STRING", "nombre=Alb&edad=30"); // Cadena de consulta para GET
@@ -94,8 +96,20 @@ fn serve_cgi(
         None => "".to_string(),
     };
     env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
-    env::set_var("CONTENT_LENGTH", ""); // Longitud del contenido para POST
-    let output = Command::new(program).arg(&path).output();
+    env::set_var("CONTENT_LENGTH", request.body.len().to_string().as_str()); // Longitud del contenido para POST
+    let mut child = Command::new(program)
+        .arg(&path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn child process");
+
+    let stdin = child.stdin.as_mut().expect("msg");
+    println!("in: {}", request.body.clone());
+    stdin
+        .write_all(request.body.as_bytes())
+        .expect("Error writing stdin");
+    let output = child.wait_with_output();
     match output {
         Ok(output) => Ok(output.stdout),
         Err(_) => Err("Error runing command"),
