@@ -86,15 +86,24 @@ fn serve_cgi(
 ) -> Result<Vec<u8>, &'static str> {
     use std::{env, io::Write, process::Stdio};
 
-    use hteapot::HttpMethod;
-
+    let query = request
+        .args
+        .iter()
+        .map(|(key, value)| format!("{key}={value}")) // Convierte cada par en "key=value"
+        .collect::<Vec<_>>() // Recolecta las cadenas en un Vec
+        .join("&");
+    println!("query: {}", query);
+    env::set_var("REDIRECT_STATUS", "hteapot");
+    env::set_var("SCRIPT_NAME", path);
+    env::set_var("SCRIPT_FILENAME", path);
+    env::set_var("QUERY_STRING", query);
     env::set_var("REQUEST_METHOD", request.method.to_str()); // Método HTTP de la petición
-    env::set_var("QUERY_STRING", "nombre=Alb&edad=30"); // Cadena de consulta para GET
     let content_type = request.headers.get("CONTENT_TYPE");
     let content_type = match content_type {
         Some(s) => s.clone(),
         None => "".to_string(),
     };
+
     env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
     env::set_var("CONTENT_LENGTH", request.body.len().to_string().as_str()); // Longitud del contenido para POST
     let mut child = Command::new(program)
