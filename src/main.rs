@@ -25,7 +25,6 @@ fn is_proxy(config: &Config, path: String) -> Option<String> {
         if !proxy_path.ends_with("/") {
             proxy_path_f = format!("{}/", proxy_path);
         }
-        println!("{} -- {}", proxy_path_f, path);
         let path_proxy = path.strip_prefix(&proxy_path_f);
         if path_proxy.is_some() {
             let path_proxy = path_proxy.unwrap();
@@ -92,7 +91,6 @@ fn serve_cgi(
         .map(|(key, value)| format!("{key}={value}")) // Convierte cada par en "key=value"
         .collect::<Vec<_>>() // Recolecta las cadenas en un Vec
         .join("&");
-    println!("query: {}", query);
     env::set_var("REDIRECT_STATUS", "hteapot");
     env::set_var("SCRIPT_NAME", path);
     env::set_var("SCRIPT_FILENAME", path);
@@ -114,13 +112,19 @@ fn serve_cgi(
         .expect("Failed to spawn child process");
 
     let stdin = child.stdin.as_mut().expect("msg");
-    println!("in: {}", request.body.clone());
     stdin
         .write_all(request.body.as_bytes())
         .expect("Error writing stdin");
     let output = child.wait_with_output();
     match output {
-        Ok(output) => Ok(output.stdout),
+        Ok(output) => {
+            println!("status: {}", output.status);
+            if output.status.success() {
+                Ok(output.stdout)
+            } else {
+                Err("Command exit with non-zero status")
+            }
+        }
         Err(_) => Err("Error runing command"),
     }
 }
