@@ -118,7 +118,6 @@ fn serve_cgi(
     let output = child.wait_with_output();
     match output {
         Ok(output) => {
-            println!("status: {}", output.status);
             if output.status.success() {
                 Ok(output.stdout)
             } else {
