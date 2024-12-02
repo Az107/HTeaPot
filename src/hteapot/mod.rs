@@ -107,7 +107,7 @@ impl Hteapot {
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
                 loop {
-                    {
+                    if streams_to_handle.len() < 10 {
                         let (lock, cvar) = &*pool_clone;
                         let mut pool = lock.lock().expect("Error locking pool");
                         let pl_copy;
