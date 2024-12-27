@@ -84,7 +84,6 @@ fn serve_cgi(
     request: HttpRequest,
 ) -> Result<Vec<u8>, &'static str> {
     use std::{env, io::Write, process::Stdio};
-
     let query = request
         .args
         .iter()
