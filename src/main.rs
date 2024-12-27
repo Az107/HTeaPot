@@ -55,7 +55,6 @@ fn serve_cgi(
     request: HttpRequest,
 ) -> Result<Vec<u8>, &'static str> {
     use std::{env, io::Write, process::Stdio};
-
     let query = request
         .args
         .iter()
@@ -211,7 +210,7 @@ fn main() {
 
                 return match cgi_result {
                     Ok(result) => HttpResponse::new(HttpStatus::OK, result, None),
-                    Err(_) => HttpResponse::new(
+                    Err(err) => HttpResponse::new(
                         HttpStatus::InternalServerError,
                         "Internal server error",
                         None,

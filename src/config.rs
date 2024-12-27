@@ -127,7 +127,7 @@ impl Config {
         Config {
             port: 8080,
             host: "localhost".to_string(),
-            root: "./".to_string(),
+            root: ".".to_string(),
             index: "index.html".to_string(),
             log_file: None,
             //error: "error.html".to_string(),
@@ -178,10 +178,14 @@ impl Config {
         }
 
         let map = map.get("HTEAPOT").unwrap();
+        let mut root = map.get2("root").unwrap_or(".".to_string());
+        if root.ends_with('/') {
+            root.pop();
+        }
         Config {
             port: map.get2("port").unwrap_or(8080),
             host: map.get2("host").unwrap_or("".to_string()),
-            root: map.get2("root").unwrap_or("./".to_string()),
+            root,
             threads: map.get2("threads").unwrap_or(1),
             cache: map.get2("cache").unwrap_or(false),
             cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
