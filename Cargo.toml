@@ -15,5 +15,6 @@ authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 name = "hteapot"
 path = "src/hteapot/mod.rs"
 
+
 [[bin]]
 name = "hteapot"

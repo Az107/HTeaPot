@@ -1,4 +1,3 @@
-mod brew;
 mod cache;
 mod config;
 pub mod hteapot;
@@ -9,10 +8,10 @@ use std::io;
 use std::path::Path;
 use std::sync::Mutex;
 
-use brew::fetch;
 use cache::Cache;
 use config::Config;
-use hteapot::{Hteapot, HttpResponse, HttpStatus};
+use hteapot::brew;
+use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 
 use logger::Logger;
 
@@ -34,14 +33,6 @@ fn is_proxy(config: &Config, path: String) -> Option<String> {
         }
     }
     None
-}
-
-fn serve_proxy(proxy_url: String) -> HttpResponse {
-    let raw_response = fetch(&proxy_url);
-    match raw_response {
-        Ok(raw) => HttpResponse::new_raw(raw),
-        Err(_) => HttpResponse::new(HttpStatus::NotFound, "not found", None),
-    }
 }
 
 fn get_mime_tipe(path: &String) -> String {
@@ -155,7 +146,16 @@ fn main() {
         let is_proxy = is_proxy(&config, req.path.clone());
 
         if proxy_only || is_proxy.is_some() {
-            return serve_proxy(is_proxy.unwrap());
+            let res = req.brew(is_proxy.unwrap().as_str());
+            if res.is_ok() {
+                return res.unwrap();
+            } else {
+                return HttpResponse::new(
+                    HttpStatus::InternalServerError,
+                    "Internal Server Error",
+                    None,
+                );
+            }
         }
 
         let mut full_path = format!("{}{}", config.root, req.path.clone());
@@ -163,6 +163,7 @@ fn main() {
             let separator = if full_path.ends_with('/') { "" } else { "/" };
             full_path = format!("{}{}{}", full_path, separator, config.index);
         }
+
         if !Path::new(full_path.as_str()).exists() {
             logger
                 .lock()

@@ -2,6 +2,7 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
+pub mod brew;
 mod methods;
 mod response;
 mod status;
