@@ -3,12 +3,14 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 
 use super::methods::HttpMethod;
 use super::request::HttpRequest;
 use super::response::HttpResponse;
 use super::status::HttpStatus;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -62,13 +64,29 @@ impl HttpRequest {
         result
     }
 
-    pub fn brew(&self, direction: &str) -> Result<HttpResponse, &'static str> {
-        let stream = TcpStream::connect(direction);
+    pub fn brew(&self, addr: &str) -> Result<HttpResponse, &'static str> {
+        let mut addr = addr.to_string();
+        if addr.starts_with("http://") {
+            addr = addr.strip_prefix("http://").unwrap().to_string();
+        } else if addr.starts_with("https://") {
+            return Err("Not implemented yet");
+        }
+        if !addr.contains(':') {
+            let _addr = format!("{}:80", addr.clone());
+            addr = _addr
+        }
+        let addr: Vec<_> = addr
+            .to_socket_addrs()
+            .expect("Unable to resolve domain")
+            .collect();
+        let addr = addr.first().expect("Error parsing address");
+        let stream = TcpStream::connect_timeout(addr, Duration::from_secs(5));
         if stream.is_err() {
             return Err("Error connecting to server");
         }
         let mut stream = stream.unwrap();
         let _ = stream.write(self.to_string().as_bytes());
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut raw: Vec<u8> = Vec::new();
 
         loop {
@@ -169,7 +187,13 @@ mod tests {
 
     #[test]
     fn test_http_request() {
-        let r = HttpRequest::new(HttpMethod::GET, "/").brew("example.org:8080");
+        let r = HttpRequest::new(HttpMethod::GET, "/").brew("example.org:80");
         assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_http_request_time_out() {
+        let r = HttpRequest::new(HttpMethod::GET, "/").brew("example.org:8080");
+        assert!(r.is_err());
     }
 }

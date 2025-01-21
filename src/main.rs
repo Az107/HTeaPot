@@ -22,13 +22,10 @@ fn is_proxy(config: &Config, path: String) -> Option<String> {
         let path_proxy = path.strip_prefix(proxy_path);
         if path_proxy.is_some() {
             let path_proxy = path_proxy.unwrap();
-            let url = config.proxy_rules.get(proxy_path).unwrap();
-            let separator = if path_proxy.starts_with('/') || url.ends_with('/') {
-                ""
-            } else {
-                "/"
-            };
-            let url = format!("{}{}{}", url, separator, path_proxy);
+            let url = config.proxy_rules.get(proxy_path).unwrap().clone();
+            if url.ends_with('/') {
+                url.strip_suffix('/');
+            }
             return Some(url);
         }
     }

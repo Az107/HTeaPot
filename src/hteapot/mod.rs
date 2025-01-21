@@ -4,10 +4,12 @@
 
 pub mod brew;
 mod methods;
+mod request;
 mod response;
 mod status;
 
 pub use self::methods::HttpMethod;
+pub use self::request::HttpRequest;
 pub use self::response::HttpResponse;
 pub use self::status::HttpStatus;
 
@@ -19,26 +21,6 @@ use std::thread;
 use std::time::Duration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[macro_export]
-macro_rules! headers {
-    ( $($k:expr => $v:expr),*) => {
-        {
-            use std::collections::HashMap;
-            let mut headers: HashMap<String, String> = HashMap::new();
-            $( headers.insert($k.to_string(), $v.to_string()); )*
-            Some(headers)
-        }
-    };
-}
-
-pub struct HttpRequest {
-    pub method: HttpMethod,
-    pub path: String,
-    pub args: HashMap<String, String>,
-    pub headers: HashMap<String, String>,
-    pub body: String,
-}
 
 pub struct Hteapot {
     port: u16,
