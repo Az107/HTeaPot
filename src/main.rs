@@ -17,16 +17,26 @@ use logger::Logger;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn is_proxy(config: &Config, path: String) -> Option<String> {
+fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> {
     for proxy_path in config.proxy_rules.keys() {
-        let path_proxy = path.strip_prefix(proxy_path);
-        if path_proxy.is_some() {
-            let path_proxy = path_proxy.unwrap();
-            let url = config.proxy_rules.get(proxy_path).unwrap().clone();
-            if url.ends_with('/') {
-                url.strip_suffix('/');
-            }
-            return Some(url);
+        let path_match = req.path.strip_prefix(proxy_path);
+        if path_match.is_some() {
+            let new_path = path_match.unwrap();
+            let mut url = config.proxy_rules.get(proxy_path).unwrap().clone();
+            // if url.ends_with('/') {
+            //     url = url.strip_suffix('/').to_owned();
+            // }
+            let mut proxy_req = req.clone();
+            proxy_req.path = new_path.to_string();
+            proxy_req.headers.remove("Host");
+            let host_parts: Vec<_> = url.split("://").collect();
+            let host = if host_parts.len() == 1 {
+                host_parts.first().unwrap()
+            } else {
+                host_parts.last().clone().unwrap()
+            };
+            proxy_req.header("Host", host);
+            return Some((url, proxy_req));
         }
     }
     None
@@ -140,10 +150,11 @@ fn main() {
             req.path
         ));
 
-        let is_proxy = is_proxy(&config, req.path.clone());
+        let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
-            let res = req.brew(is_proxy.unwrap().as_str());
+            let (host, proxy_req) = is_proxy.unwrap();
+            let res = proxy_req.brew(host.as_str());
             if res.is_ok() {
                 return res.unwrap();
             } else {

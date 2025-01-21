@@ -12,8 +12,6 @@ use super::response::HttpResponse;
 use super::status::HttpStatus;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 impl HttpRequest {
     pub fn new(method: HttpMethod, path: &str) -> HttpRequest {
         let path = path.to_string();
@@ -55,12 +53,19 @@ impl HttpRequest {
             }
             path
         };
-        let mut result: String = format!("{} {} HTTP/1.1\n", self.method.to_str(), path);
+        let path = if path.is_empty() {
+            "/".to_string()
+        } else {
+            path
+        };
+        let mut result: String = format!("{} {} HTTP/1.1\r\n", self.method.to_str(), path);
         for (k, v) in self.headers.iter() {
-            result.push_str(format!("{}: {}\n", k, v).as_str());
+            result.push_str(format!("{}: {}\r\n", k, v).as_str());
         }
-        result.push('\n');
-        result.push_str(self.body.as_str());
+        if !self.body.is_empty() {
+            result.push_str(self.body.as_str());
+        }
+        result.push_str("\r\n\r\n");
         result
     }
 
@@ -84,8 +89,10 @@ impl HttpRequest {
         if stream.is_err() {
             return Err("Error connecting to server");
         }
+
         let mut stream = stream.unwrap();
         let _ = stream.write(self.to_string().as_bytes());
+        let _ = stream.flush();
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut raw: Vec<u8> = Vec::new();
 
@@ -173,7 +180,7 @@ mod tests {
     #[test]
     fn test_http_request_to_string_with_args() {
         let mut request = HttpRequest::new(HttpMethod::POST, "/resource");
-        let response = request
+        let _ = request
             .header("Content-Type", "application/json")
             .arg("key", "value")
             .body("{\"data\":\"test\"}".to_string())

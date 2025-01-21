@@ -13,6 +13,7 @@ macro_rules! headers {
     };
 }
 
+#[derive(Clone)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
