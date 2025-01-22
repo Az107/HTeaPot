@@ -1,4 +1,3 @@
-mod brew;
 mod cache;
 mod config;
 pub mod hteapot;
@@ -9,39 +8,37 @@ use std::io;
 use std::path::Path;
 use std::sync::Mutex;
 
-use brew::fetch;
 use cache::Cache;
 use config::Config;
-use hteapot::{Hteapot, HttpResponse, HttpStatus};
+use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 
 use logger::Logger;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn is_proxy(config: &Config, path: String) -> Option<String> {
+fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> {
     for proxy_path in config.proxy_rules.keys() {
-        let path_proxy = path.strip_prefix(proxy_path);
-        if path_proxy.is_some() {
-            let path_proxy = path_proxy.unwrap();
-            let url = config.proxy_rules.get(proxy_path).unwrap();
-            let separator = if path_proxy.starts_with('/') || url.ends_with('/') {
-                ""
+        let path_match = req.path.strip_prefix(proxy_path);
+        if path_match.is_some() {
+            let new_path = path_match.unwrap();
+            let url = config.proxy_rules.get(proxy_path).unwrap().clone();
+            // if url.ends_with('/') {
+            //     url = url.strip_suffix('/').to_owned();
+            // }
+            let mut proxy_req = req.clone();
+            proxy_req.path = new_path.to_string();
+            proxy_req.headers.remove("Host");
+            let host_parts: Vec<_> = url.split("://").collect();
+            let host = if host_parts.len() == 1 {
+                host_parts.first().unwrap()
             } else {
-                "/"
+                host_parts.last().clone().unwrap()
             };
-            let url = format!("{}{}{}", url, separator, path_proxy);
-            return Some(url);
+            proxy_req.header("Host", host);
+            return Some((url, proxy_req));
         }
     }
     None
-}
-
-fn serve_proxy(proxy_url: String) -> HttpResponse {
-    let raw_response = fetch(&proxy_url);
-    match raw_response {
-        Ok(raw) => HttpResponse::new_raw(raw),
-        Err(_) => HttpResponse::new(HttpStatus::NotFound, "not found", None),
-    }
 }
 
 fn get_mime_tipe(path: &String) -> String {
@@ -152,10 +149,20 @@ fn main() {
             req.path
         ));
 
-        let is_proxy = is_proxy(&config, req.path.clone());
+        let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
-            return serve_proxy(is_proxy.unwrap());
+            let (host, proxy_req) = is_proxy.unwrap();
+            let res = proxy_req.brew(host.as_str());
+            if res.is_ok() {
+                return res.unwrap();
+            } else {
+                return HttpResponse::new(
+                    HttpStatus::InternalServerError,
+                    "Internal Server Error",
+                    None,
+                );
+            }
         }
 
         let mut full_path = format!("{}{}", config.root, req.path.clone());
@@ -163,6 +170,7 @@ fn main() {
             let separator = if full_path.ends_with('/') { "" } else { "/" };
             full_path = format!("{}{}{}", full_path, separator, config.index);
         }
+
         if !Path::new(full_path.as_str()).exists() {
             logger
                 .lock()

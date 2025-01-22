@@ -2,11 +2,14 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
+pub mod brew;
 mod methods;
+mod request;
 mod response;
 mod status;
 
 pub use self::methods::HttpMethod;
+pub use self::request::HttpRequest;
 pub use self::response::HttpResponse;
 pub use self::status::HttpStatus;
 
@@ -29,14 +32,6 @@ macro_rules! headers {
             Some(headers)
         }
     };
-}
-
-pub struct HttpRequest {
-    pub method: HttpMethod,
-    pub path: String,
-    pub args: HashMap<String, String>,
-    pub headers: HashMap<String, String>,
-    pub body: String,
 }
 
 pub struct Hteapot {
@@ -321,7 +316,13 @@ impl Hteapot {
             socket_status.reading = false;
         }
 
-        let request_string = String::from_utf8(socket_status.data_readed.clone()).unwrap();
+        let request_string = String::from_utf8(socket_status.data_readed.clone());
+        let request_string = if request_string.is_err() {
+            //This proablly means the request is a https so for the moment GTFO
+            return None;
+        } else {
+            request_string.unwrap()
+        };
         // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {

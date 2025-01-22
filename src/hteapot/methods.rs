@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum HttpMethod {
     GET,
     POST,
@@ -11,7 +11,6 @@ pub enum HttpMethod {
     CONNECT,
     Other(String),
 }
-
 impl HttpMethod {
     pub fn from_str(method: &str) -> HttpMethod {
         match method {
