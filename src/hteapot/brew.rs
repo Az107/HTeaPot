@@ -2,15 +2,15 @@
 // This is the HTTP client module, it will handle the requests and responses
 
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 use super::methods::HttpMethod;
 use super::request::HttpRequest;
 use super::response::HttpResponse;
-use super::status::HttpStatus;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+// use super::status::HttpStatus;
+// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 impl HttpRequest {
     pub fn new(method: HttpMethod, path: &str) -> HttpRequest {
@@ -105,9 +105,9 @@ pub fn brew(direction: &str, request: HttpRequest) -> Result<HttpResponse, &'sta
     return request.brew(direction);
 }
 
-pub fn brew_url(url: &str) -> Result<HttpResponse, &'static str> {
-    todo!()
-}
+// pub fn brew_url(url: &str) -> Result<HttpResponse, &'static str> {
+//     todo!()
+// }
 
 #[cfg(test)]
 mod tests {

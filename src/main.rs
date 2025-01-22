@@ -10,7 +10,6 @@ use std::sync::Mutex;
 
 use cache::Cache;
 use config::Config;
-use hteapot::brew;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 
 use logger::Logger;
@@ -22,7 +21,7 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
         let path_match = req.path.strip_prefix(proxy_path);
         if path_match.is_some() {
             let new_path = path_match.unwrap();
-            let mut url = config.proxy_rules.get(proxy_path).unwrap().clone();
+            let url = config.proxy_rules.get(proxy_path).unwrap().clone();
             // if url.ends_with('/') {
             //     url = url.strip_suffix('/').to_owned();
             // }
