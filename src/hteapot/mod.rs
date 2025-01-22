@@ -2,6 +2,9 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
+#[cfg(feature = "ssl")]
+extern crate native_tls;
+
 pub mod brew;
 mod methods;
 mod request;
@@ -34,10 +37,15 @@ macro_rules! headers {
     };
 }
 
+#[cfg(feature = "ssl")]
+pub struct sslConfig {}
+
 pub struct Hteapot {
     port: u16,
     address: String,
     threads: u16,
+    #[cfg(feature = "ssl")]
+    sslConfig: Option<sslConfig>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,7 +69,8 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: 1,
-            //cache: HashMap::new(),
+            #[cfg(feature = "ssl")]
+            sslConfig: None, //cache: HashMap::new(),
         }
     }
 
@@ -70,8 +79,16 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: if threads == 0 { 1 } else { threads },
-            //cache: HashMap::new(),
+            #[cfg(feature = "ssl")]
+            sslConfig: None, //cache: HashMap::new(),
+                             //cache: HashMap::new(),
         }
+    }
+
+    #[cfg(feature = "ssl")]
+    pub fn set_ssl(&mut self) -> &mut Self {
+        self.sslConfig = Some(sslConfig {});
+        return self;
     }
 
     // Start the server

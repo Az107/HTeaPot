@@ -100,6 +100,7 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
 pub struct Config {
     pub port: u16,    // Port number to listen
     pub host: String, // Host name or IP
+    pub ssl: bool,
     pub root: String, // Root directory to serve files
     pub cache: bool,
     pub cache_ttl: u16,
@@ -127,6 +128,7 @@ impl Config {
             host: "localhost".to_string(),
             root: "./".to_string(),
             index: "index.html".to_string(),
+            ssl: false,
             //error: "error.html".to_string(),
             threads: 1,
             cache: false,
@@ -164,6 +166,7 @@ impl Config {
             root: map.get2("root").unwrap_or("./".to_string()),
             threads: map.get2("threads").unwrap_or(1),
             cache: map.get2("cache").unwrap_or(false),
+            ssl: map.get2("ssl").unwrap_or(false),
             cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
             index: map.get2("index").unwrap_or("index.html".to_string()),
             //error: map.get2("error").unwrap_or("error.html".to_string()),

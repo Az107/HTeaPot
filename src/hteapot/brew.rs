@@ -6,6 +6,9 @@ use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
+#[cfg(feature = "ssl")]
+use super::native_tls::TlsConnector;
+
 use super::methods::HttpMethod;
 use super::request::HttpRequest;
 use super::response::HttpResponse;
@@ -70,14 +73,22 @@ impl HttpRequest {
     }
 
     pub fn brew(&self, addr: &str) -> Result<HttpResponse, &'static str> {
+        let mut port = "80";
+        let mut https = false;
+
         let mut addr = addr.to_string();
         if addr.starts_with("http://") {
             addr = addr.strip_prefix("http://").unwrap().to_string();
         } else if addr.starts_with("https://") {
-            return Err("Not implemented yet");
+            addr = addr.strip_prefix("http://").unwrap().to_string();
+            port = "443";
+            https = true;
+
+            #[cfg(not(feature = "ssl"))]
+            return Err("Not implemented");
         }
         if !addr.contains(':') {
-            let _addr = format!("{}:80", addr.clone());
+            let _addr = format!("{}:{}", addr.clone(), port);
             addr = _addr
         }
         let addr: Vec<_> = addr
@@ -89,11 +100,21 @@ impl HttpRequest {
         if stream.is_err() {
             return Err("Error connecting to server");
         }
-
         let mut stream = stream.unwrap();
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+
+        #[cfg(feature = "ssl")]
+        let mut stream = if https {
+            TlsConnector::new()
+                .unwrap()
+                .connect(&addr.ip().to_string(), stream)
+                .unwrap()
+        } else {
+            stream
+        };
+
         let _ = stream.write(self.to_string().as_bytes());
         let _ = stream.flush();
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut raw: Vec<u8> = Vec::new();
         let _ = stream.read_to_end(&mut raw);
 
