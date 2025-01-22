@@ -2,7 +2,7 @@
 // This is the HTTP client module, it will handle the requests and responses
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
@@ -95,24 +95,7 @@ impl HttpRequest {
         let _ = stream.flush();
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
         let mut raw: Vec<u8> = Vec::new();
-
-        loop {
-            let mut buffer = [0; 1024];
-            match stream.read(&mut buffer) {
-                Err(e) => match e.kind() {
-                    _ => {
-                        return Err("Error making request");
-                    }
-                },
-                Ok(m) => {
-                    if m == 0 {
-                        break;
-                    } else {
-                        raw.append(&mut buffer.to_vec());
-                    }
-                }
-            };
-        }
+        let _ = stream.read_to_end(&mut raw);
 
         Ok(HttpResponse::new_raw(raw))
     }

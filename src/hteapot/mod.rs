@@ -22,6 +22,18 @@ use std::time::Duration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[macro_export]
+macro_rules! headers {
+    ( $($k:expr => $v:expr),*) => {
+        {
+            use std::collections::HashMap;
+            let mut headers: HashMap<String, String> = HashMap::new();
+            $( headers.insert($k.to_string(), $v.to_string()); )*
+            Some(headers)
+        }
+    };
+}
+
 pub struct Hteapot {
     port: u16,
     address: String,
@@ -304,7 +316,13 @@ impl Hteapot {
             socket_status.reading = false;
         }
 
-        let request_string = String::from_utf8(socket_status.data_readed.clone()).unwrap();
+        let request_string = String::from_utf8(socket_status.data_readed.clone());
+        let request_string = if request_string.is_err() {
+            //This proablly means the request is a https so for the moment GTFO
+            return None;
+        } else {
+            request_string.unwrap()
+        };
         // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
         let request = Self::request_parser(request_string);
         if request.is_err() {
