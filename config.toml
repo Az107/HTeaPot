@@ -5,8 +5,12 @@ threads = 4
 root = "public"
 cache = true
 cache_ttl = 36
+ssl = false
+cert = ""
+ssl_password = ""
 [proxy]
 "/test" = "http://example.com"
-"/google" = "http://google.com"
-"/myip" = "http://ifconfig.co"
+"/secure_test" = "https://example.com"
+"/google" = "https://www.google.com/"
+"/myip" = "https://ifconfig.co"
 # "/" = "http://ifconfig.co" # this will override all the proxys and local request

@@ -121,7 +121,10 @@ fn main() {
     let proxy_only = config.proxy_rules.get("/").is_some();
     let logger = Mutex::new(Logger::new(io::stdout()));
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
-    let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+    let mut server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+    if config.ssl {
+        server.set_ssl(&config.cert, &config.ssl_password);
+    }
     logger.lock().expect("this doesnt work :C").msg(format!(
         "Server started at http://{}:{}",
         config.host, config.port

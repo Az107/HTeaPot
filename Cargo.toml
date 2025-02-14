@@ -11,9 +11,6 @@ readme = "readme.md"
 categories = ["network-programming", "web-programming"]
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 
-[features]
-ssl = ["native-tls"]
-
 
 [lib]
 name = "hteapot"
@@ -24,4 +21,4 @@ path = "src/hteapot/mod.rs"
 name = "hteapot"
 
 [dependencies]
-native-tls = { version = "0.2.12", optional = true }
+native-tls = "0.2.12"

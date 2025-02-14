@@ -101,6 +101,8 @@ pub struct Config {
     pub port: u16,    // Port number to listen
     pub host: String, // Host name or IP
     pub ssl: bool,
+    pub cert: String,
+    pub ssl_password: String,
     pub root: String, // Root directory to serve files
     pub cache: bool,
     pub cache_ttl: u16,
@@ -129,6 +131,8 @@ impl Config {
             root: "./".to_string(),
             index: "index.html".to_string(),
             ssl: false,
+            cert: String::new(),
+            ssl_password: String::new(),
             //error: "error.html".to_string(),
             threads: 1,
             cache: false,
@@ -167,6 +171,8 @@ impl Config {
             threads: map.get2("threads").unwrap_or(1),
             cache: map.get2("cache").unwrap_or(false),
             ssl: map.get2("ssl").unwrap_or(false),
+            cert: map.get2("cert").unwrap_or("".to_string()),
+            ssl_password: map.get2("ssl_password").unwrap_or("".to_string()),
             cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
             index: map.get2("index").unwrap_or("index.html".to_string()),
             //error: map.get2("error").unwrap_or("error.html".to_string()),

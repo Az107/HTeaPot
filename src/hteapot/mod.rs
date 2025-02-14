@@ -2,8 +2,11 @@
 // This is the HTTP server module, it will handle the requests and responses
 // Also provide utilities to parse the requests and build the responses
 
-#[cfg(feature = "ssl")]
 extern crate native_tls;
+
+use self::native_tls::TlsStream;
+
+use self::native_tls::{Identity, TlsAcceptor};
 
 pub mod brew;
 mod methods;
@@ -17,8 +20,11 @@ pub use self::response::HttpResponse;
 pub use self::status::HttpStatus;
 
 use std::collections::{HashMap, VecDeque};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::error::Error;
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter, ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::ops::Deref;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -37,15 +43,16 @@ macro_rules! headers {
     };
 }
 
-#[cfg(feature = "ssl")]
-pub struct sslConfig {}
+pub struct SslConfig {
+    cert: String,
+    password: String,
+}
 
 pub struct Hteapot {
     port: u16,
     address: String,
     threads: u16,
-    #[cfg(feature = "ssl")]
-    sslConfig: Option<sslConfig>,
+    ssl_config: Option<SslConfig>,
 }
 
 #[derive(Clone, Debug)]
@@ -57,8 +64,13 @@ struct SocketStatus {
     index_writed: usize,
 }
 
+enum Stream {
+    Plain(TcpStream),
+    Tls(TlsStream<TcpStream>),
+}
+
 struct SocketData {
-    stream: TcpStream,
+    stream: Stream,
     status: Option<SocketStatus>,
 }
 
@@ -69,8 +81,7 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: 1,
-            #[cfg(feature = "ssl")]
-            sslConfig: None, //cache: HashMap::new(),
+            ssl_config: None, //cache: HashMap::new(),
         }
     }
 
@@ -79,21 +90,37 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: if threads == 0 { 1 } else { threads },
-            #[cfg(feature = "ssl")]
-            sslConfig: None, //cache: HashMap::new(),
-                             //cache: HashMap::new(),
+            ssl_config: None, //cache: HashMap::new(),
+                              //cache: HashMap::new(),
         }
     }
 
-    #[cfg(feature = "ssl")]
-    pub fn set_ssl(&mut self) -> &mut Self {
-        self.sslConfig = Some(sslConfig {});
+    pub fn set_ssl(&mut self, cert: &str, pass: &str) -> &mut Self {
+        self.ssl_config = Some(SslConfig {
+            cert: cert.to_string(),
+            password: pass.to_string(),
+        });
         return self;
     }
 
     // Start the server
     pub fn listen(&self, action: impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static) {
         let addr = format!("{}:{}", self.address, self.port);
+        let mut acceptor: Option<TlsAcceptor> = None;
+        if self.ssl_config.is_some() {
+            acceptor = {
+                let mut file = File::open(&self.ssl_config.as_ref().unwrap().cert).unwrap();
+                let mut cert_data = Vec::new();
+                file.read_to_end(&mut cert_data).unwrap();
+                let identity =
+                    Identity::from_pkcs12(&cert_data, &self.ssl_config.as_ref().unwrap().password)
+                        .unwrap();
+
+                let acceptor = TlsAcceptor::new(identity).unwrap();
+                Some(acceptor)
+            };
+        }
+
         let listener = TcpListener::bind(addr);
         let listener = match listener {
             Ok(listener) => listener,
@@ -102,8 +129,10 @@ impl Hteapot {
                 return;
             }
         };
-        let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
+
+        let pool: Arc<(Mutex<VecDeque<Stream>>, Condvar)> =
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+
         //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
         let priority_list: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
         let arc_action = Arc::new(action);
@@ -172,7 +201,7 @@ impl Hteapot {
                             continue;
                         }
                         let r = Hteapot::handle_client(
-                            &stream_data.stream,
+                            &mut stream_data.stream,
                             stream_data.status.as_mut().unwrap().clone(),
                             &action_clone,
                         );
@@ -190,19 +219,43 @@ impl Hteapot {
         let pool_clone = pool.clone();
         loop {
             let stream = listener.accept();
+
             if stream.is_err() {
                 continue;
             }
             let (stream, _) = stream.unwrap();
-            stream
-                .set_nonblocking(true)
-                .expect("Error seting non blocking");
-            stream.set_nodelay(true).expect("Error seting no delay");
+
             {
                 let (lock, cvar) = &*pool_clone;
                 let mut pool = lock.lock().expect("Error locking pool");
-
-                pool.push_front(stream);
+                if acceptor.as_ref().is_none() {
+                    stream
+                        .set_nonblocking(true)
+                        .expect("Error seting non blocking");
+                    stream.set_nodelay(true).expect("Error seting no delay");
+                    pool.push_front(Stream::Plain(stream));
+                } else {
+                    let acceptor = acceptor.as_ref().unwrap();
+                    loop {
+                        let _stream = stream.try_clone().expect("msg");
+                        let tls_stream = acceptor.accept(_stream);
+                        match tls_stream {
+                            Ok(tls_stream) => {
+                                pool.push_front(Stream::Tls(tls_stream));
+                                break;
+                            }
+                            Err(e) => {
+                                println!("{:?}", e);
+                                let e = e.source();
+                                if e.is_none() {
+                                    continue;
+                                }
+                                pool.push_front(Stream::Plain(stream.try_clone().expect("msg")));
+                                break;
+                            }
+                        }
+                    }
+                }
                 cvar.notify_one();
             }
             // Notify one waiting thread
@@ -292,17 +345,22 @@ impl Hteapot {
 
     // Handle the client when a request is received
     fn handle_client(
-        stream: &TcpStream,
+        stream: &mut Stream,
         socket_status: SocketStatus,
         action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
     ) -> Option<SocketStatus> {
-        let mut reader = BufReader::new(stream);
-        let mut writer = BufWriter::new(stream);
+        //let mut reader = BufReader::new(stream);
+        //let mut writer = BufWriter::new(stream);
+        println!("handling...");
         let mut socket_status = socket_status.clone();
         if socket_status.reading {
             loop {
                 let mut buffer = [0; 1024];
-                match reader.read(&mut buffer) {
+                let reader_result = match stream {
+                    Stream::Plain(stream) => stream.read(&mut buffer),
+                    Stream::Tls(stream) => stream.read(&mut buffer),
+                };
+                match reader_result {
                     Err(e) => match e.kind() {
                         io::ErrorKind::WouldBlock => {
                             return Some(socket_status);
@@ -365,7 +423,11 @@ impl Hteapot {
             socket_status.data_write = response.to_bytes();
         }
         for n in socket_status.index_writed..socket_status.data_write.len() {
-            let r = writer.write(&[socket_status.data_write[n]]);
+            //let r = writer.write();
+            let r = match stream {
+                Stream::Plain(stream) => stream.write(&[socket_status.data_write[n]]),
+                Stream::Tls(stream) => stream.write(&[socket_status.data_write[n]]),
+            };
             if r.is_err() {
                 let error = r.err().unwrap();
                 if error.kind() == io::ErrorKind::WouldBlock {
@@ -378,7 +440,10 @@ impl Hteapot {
             socket_status.index_writed += r.unwrap();
         }
 
-        let r = writer.flush();
+        let r = match stream {
+            Stream::Plain(stream) => stream.flush(),
+            Stream::Tls(stream) => stream.flush(),
+        };
         if r.is_err() {
             eprintln!("Error2: {}", r.err().unwrap());
             return Some(socket_status);
@@ -390,7 +455,15 @@ impl Hteapot {
             socket_status.index_writed = 0;
             return Some(socket_status);
         } else {
-            let _ = stream.shutdown(Shutdown::Both);
+            println!("Done");
+            let _ = match stream {
+                Stream::Plain(stream) => {
+                    stream.shutdown(Shutdown::Both);
+                }
+                Stream::Tls(stream) => {
+                    stream.shutdown();
+                }
+            };
             None
         }
     }
