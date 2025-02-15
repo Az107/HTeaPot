@@ -54,6 +54,17 @@ struct SocketData {
     status: Option<SocketStatus>,
 }
 
+impl SocketData {
+    fn has_data(&mut self) -> bool {
+        let mut buf = [0; 1];
+        match self.stream.peek(&mut buf) {
+            Ok(_) => true,                                                // Hay datos disponibles
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => false, // No hay datos, está inactivo
+            Err(_) => true, // Cualquier otro error, mejor procesarlo
+        }
+    }
+}
+
 impl Hteapot {
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
@@ -150,10 +161,15 @@ impl Hteapot {
                         }
                     }
 
+                    let mut processed = 0;
                     for stream_data in streams_to_handle.iter_mut() {
                         if stream_data.status.is_none() {
                             continue;
                         }
+                        if !stream_data.has_data() {
+                            continue;
+                        }
+                        processed += 1;
                         let r = Hteapot::handle_client(
                             &stream_data.stream,
                             stream_data.status.as_mut().unwrap().clone(),
@@ -165,6 +181,9 @@ impl Hteapot {
                     {
                         let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
                         pl_lock[_tn] = streams_to_handle.len();
+                    }
+                    if processed == 0 {
+                        thread::sleep(Duration::from_millis(10));
                     }
                 }
             });
