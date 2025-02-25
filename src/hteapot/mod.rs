@@ -154,7 +154,10 @@ impl Hteapot {
                         if stream_data.status.is_none() {
                             continue;
                         }
-                        Hteapot::handle_client(stream_data, &action_clone);
+                        let r = Hteapot::handle_client(stream_data, &action_clone);
+                        if r.is_none() {
+                            stream_data.status = None;
+                        }
                     }
                     streams_to_handle.retain(|s| s.status.is_some());
                     {
@@ -330,7 +333,6 @@ impl Hteapot {
             return None;
         }
         let request = request.unwrap();
-        println!("[hteapot] body: {:?}", request.body.clone());
         let keep_alive = match request.headers.get("Connection") {
             Some(ch) => ch == "keep-alive",
             None => false,
