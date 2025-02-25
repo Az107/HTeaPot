@@ -154,12 +154,7 @@ impl Hteapot {
                         if stream_data.status.is_none() {
                             continue;
                         }
-                        let r = Hteapot::handle_client(
-                            &stream_data.stream,
-                            stream_data.status.as_mut().unwrap().clone(),
-                            &action_clone,
-                        );
-                        stream_data.status = r;
+                        Hteapot::handle_client(stream_data, &action_clone);
                     }
                     streams_to_handle.retain(|s| s.status.is_some());
                     {
@@ -275,20 +270,19 @@ impl Hteapot {
 
     // Handle the client when a request is received
     fn handle_client(
-        stream: &TcpStream,
-        socket_status: SocketStatus,
+        socket_data: &mut SocketData,
         action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
-    ) -> Option<SocketStatus> {
-        let mut reader = BufReader::new(stream);
-        let mut writer = BufWriter::new(stream);
-        let mut socket_status = socket_status.clone();
-        if socket_status.reading {
+    ) -> Option<()> {
+        let mut reader = BufReader::new(&socket_data.stream);
+        let mut writer = BufWriter::new(&socket_data.stream);
+        let status = socket_data.status.as_mut()?;
+        if status.reading {
             loop {
                 let mut buffer = [0; 1024];
                 match reader.read(&mut buffer) {
                     Err(e) => match e.kind() {
                         io::ErrorKind::WouldBlock => {
-                            return Some(socket_status);
+                            return Some(());
                         }
                         io::ErrorKind::ConnectionReset => {
                             return None;
@@ -299,24 +293,30 @@ impl Hteapot {
                         }
                     },
                     Ok(m) => {
+                        status.data_readed.append(&mut buffer.to_vec());
                         if m == 0 {
                             return None;
+                        } else if m < 1024 {
+                            break;
                         }
                     }
                 };
-                socket_status.data_readed.append(&mut buffer.to_vec());
+
                 //socket_status
                 if buffer[0] == 0 {
+                    println!("buffer 0 == 0");
                     break;
                 };
                 if *buffer.last().unwrap() == 0 {
+                    println!("buffer last == 0");
+
                     break;
                 }
             }
-            socket_status.reading = false;
+            status.reading = false;
         }
 
-        let request_string = String::from_utf8(socket_status.data_readed.clone());
+        let request_string = String::from_utf8(status.data_readed.clone());
         let request_string = if request_string.is_err() {
             //This proablly means the request is a https so for the moment GTFO
             return None;
@@ -330,11 +330,12 @@ impl Hteapot {
             return None;
         }
         let request = request.unwrap();
+        println!("[hteapot] body: {:?}", request.body.clone());
         let keep_alive = match request.headers.get("Connection") {
             Some(ch) => ch == "keep-alive",
             None => false,
         };
-        if socket_status.data_write.len() == 0 {
+        if status.data_write.len() == 0 {
             let mut response = action(request);
             if !response.headers.contains_key("Conection") && keep_alive {
                 response
@@ -345,35 +346,35 @@ impl Hteapot {
                     .headers
                     .insert("Connection".to_string(), "close".to_string());
             }
-            socket_status.data_write = response.to_bytes();
+            status.data_write = response.to_bytes();
         }
-        for n in socket_status.index_writed..socket_status.data_write.len() {
-            let r = writer.write(&[socket_status.data_write[n]]);
+        for n in status.index_writed..status.data_write.len() {
+            let r = writer.write(&[status.data_write[n]]);
             if r.is_err() {
                 let error = r.err().unwrap();
                 if error.kind() == io::ErrorKind::WouldBlock {
-                    return Some(socket_status);
+                    return Some(());
                 } else {
                     eprintln!("W error: {:?}", error);
                     return None;
                 }
             }
-            socket_status.index_writed += r.unwrap();
+            status.index_writed += r.unwrap();
         }
 
         let r = writer.flush();
         if r.is_err() {
             eprintln!("Error2: {}", r.err().unwrap());
-            return Some(socket_status);
+            return Some(());
         }
         if keep_alive {
-            socket_status.reading = true;
-            socket_status.data_readed = vec![];
-            socket_status.data_write = vec![];
-            socket_status.index_writed = 0;
-            return Some(socket_status);
+            status.reading = true;
+            status.data_readed = vec![];
+            status.data_write = vec![];
+            status.index_writed = 0;
+            return Some(());
         } else {
-            let _ = stream.shutdown(Shutdown::Both);
+            let _ = socket_data.stream.shutdown(Shutdown::Both);
             None
         }
     }
