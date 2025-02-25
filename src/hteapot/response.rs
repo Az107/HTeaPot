@@ -1,21 +1,25 @@
 use super::HttpStatus;
 use super::VERSION;
 use std::collections::HashMap;
+type Headers = HashMap<String, String>;
+
+struct StreamIterator {
+    buffer: Vec<u8>,
+    closure: Box<dyn Fn() -> Option<Vec<u8>> + Send + Sync>, // Closure que genera datos
+    thread_handle: Option<std::thread::JoinHandle<()>>,
+}
 
 pub struct HttpResponse {
     pub status: HttpStatus,
-    pub headers: HashMap<String, String>,
+    pub headers: Headers,
     pub content: Vec<u8>,
+    pub stream: Option<StreamIterator>,
     raw: Option<Vec<u8>>,
     is_raw: bool,
 }
 
 impl HttpResponse {
-    pub fn new<B: AsRef<[u8]>>(
-        status: HttpStatus,
-        content: B,
-        headers: Option<HashMap<String, String>>,
-    ) -> Self {
+    pub fn new<B: AsRef<[u8]>>(status: HttpStatus, content: B, headers: Option<Headers>) -> Self {
         let mut headers = headers.unwrap_or(HashMap::new());
         let content = content.as_ref();
         headers.insert("Content-Length".to_string(), content.len().to_string());
@@ -27,8 +31,25 @@ impl HttpResponse {
             status,
             headers,
             content: content.to_owned(),
+            stream: None,
             raw: None,
             is_raw: false,
+        }
+    }
+
+    pub fn new_stream(
+        status: HttpStatus,
+        headers: Option<Headers>,
+        closure: Box<dyn Fn() -> Option<Vec<u8>> + Send + Sync>,
+    ) -> Self {
+        let streamIterator = StreamIterator::new(closure);
+        HttpResponse {
+            status: HttpStatus::IAmATeapot,
+            headers: HashMap::new(),
+            content: vec![],
+            stream: Some(streamIterator),
+            raw: None,
+            is_raw: true,
         }
     }
 
@@ -37,6 +58,7 @@ impl HttpResponse {
             status: HttpStatus::IAmATeapot,
             headers: HashMap::new(),
             content: vec![],
+            stream: None,
             raw: Some(raw),
             is_raw: true,
         }
@@ -44,6 +66,10 @@ impl HttpResponse {
 
     pub fn is_raw(&self) -> bool {
         self.is_raw
+    }
+
+    pub fn is_stream(&self) -> bool {
+        self.stream.is_some()
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
