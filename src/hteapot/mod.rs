@@ -150,16 +150,21 @@ impl Hteapot {
                         }
                     }
 
-                    for stream_data in streams_to_handle.iter_mut() {
-                        if stream_data.status.is_none() {
-                            continue;
+                    // for stream_data in streams_to_handle.iter_mut() {
+                    //     if stream_data.status.is_none() {
+                    //         continue;
+                    //     }
+                    //     let r = Hteapot::handle_client(stream_data, &action_clone);
+                    //     if r.is_none() {
+                    //         stream_data.status = None;
+                    //     }
+                    // }
+                    streams_to_handle.retain_mut(|s| {
+                        if s.status.is_none() {
+                            return false;
                         }
-                        let r = Hteapot::handle_client(stream_data, &action_clone);
-                        if r.is_none() {
-                            stream_data.status = None;
-                        }
-                    }
-                    streams_to_handle.retain(|s| s.status.is_some());
+                        Hteapot::handle_client(s, &action_clone).is_some()
+                    });
                     {
                         let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
                         pl_lock[_tn] = streams_to_handle.len();
@@ -304,17 +309,6 @@ impl Hteapot {
                         }
                     }
                 };
-
-                //socket_status
-                if buffer[0] == 0 {
-                    println!("buffer 0 == 0");
-                    break;
-                };
-                if *buffer.last().unwrap() == 0 {
-                    println!("buffer last == 0");
-
-                    break;
-                }
             }
             status.reading = false;
         }
