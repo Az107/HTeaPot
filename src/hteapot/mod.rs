@@ -363,7 +363,6 @@ impl Hteapot {
         if r.is_err() {
             return Some(());
         }
-        println!("Flushed!");
         if keep_alive {
             status.reading = true;
             status.data_readed = vec![];
