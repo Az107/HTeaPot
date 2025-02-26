@@ -344,8 +344,8 @@ impl Hteapot {
             }
             status.data_write = response.to_bytes();
         }
-        for n in status.index_writed..status.data_write.len() {
-            let r = writer.write(&[status.data_write[n]]);
+        for n in status.data_write.chunks(1024).skip(status.index_writed) {
+            let r = writer.write(&n);
             if r.is_err() {
                 let error = r.err().unwrap();
                 if error.kind() == io::ErrorKind::WouldBlock {
