@@ -281,13 +281,13 @@ impl Hteapot {
         socket_data: &mut SocketData,
         action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
     ) -> Option<()> {
-        let mut reader = BufReader::new(&socket_data.stream);
-        let mut writer = BufWriter::new(&socket_data.stream);
+        // let mut reader = BufReader::new(&socket_data.stream);
+        // let mut writer = BufWriter::new(&socket_data.stream);
         let status = socket_data.status.as_mut()?;
         if status.reading {
             loop {
                 let mut buffer = [0; 1024];
-                match reader.read(&mut buffer) {
+                match socket_data.stream.read(&mut buffer) {
                     Err(e) => match e.kind() {
                         io::ErrorKind::WouldBlock => {
                             return Some(());
@@ -345,24 +345,25 @@ impl Hteapot {
             status.data_write = response.to_bytes();
         }
         for n in status.data_write.chunks(1024).skip(status.index_writed) {
-            let r = writer.write(&n);
-            if r.is_err() {
-                let error = r.err().unwrap();
-                if error.kind() == io::ErrorKind::WouldBlock {
+            match socket_data.stream.write(&n) {
+                Ok(size) => {
+                    status.index_writed += 1;
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     return Some(());
-                } else {
-                    eprintln!("W error: {:?}", error);
+                }
+                Err(e) => {
+                    eprintln!("W error: {:?}", e);
                     return None;
                 }
             }
-            status.index_writed += r.unwrap();
         }
 
-        let r = writer.flush();
+        let r = socket_data.stream.flush();
         if r.is_err() {
-            eprintln!("Error2: {}", r.err().unwrap());
             return Some(());
         }
+        println!("Flushed!");
         if keep_alive {
             status.reading = true;
             status.data_readed = vec![];
