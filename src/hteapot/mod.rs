@@ -9,7 +9,7 @@ mod response;
 mod status;
 
 pub use self::methods::HttpMethod;
-pub use self::request::HttpRequest;
+pub use self::request::{HttpRequest, HttpRequestBuilder};
 pub use self::response::HttpResponse;
 pub use self::status::HttpStatus;
 
@@ -21,6 +21,7 @@ use std::thread;
 use std::time::Duration;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const BUFFER_SIZE: usize = 1024;
 
 #[macro_export]
 macro_rules! headers {
@@ -40,12 +41,12 @@ pub struct Hteapot {
     threads: u16,
 }
 
-#[derive(Clone, Debug)]
 struct SocketStatus {
     // TODO: write proper ttl
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
+    request: HttpRequestBuilder,
     index_writed: usize,
 }
 
@@ -134,6 +135,7 @@ impl Hteapot {
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
+                                request: HttpRequestBuilder::new(),
                                 index_writed: 0,
                             };
                             let socket_data = SocketData {
@@ -150,15 +152,6 @@ impl Hteapot {
                         }
                     }
 
-                    // for stream_data in streams_to_handle.iter_mut() {
-                    //     if stream_data.status.is_none() {
-                    //         continue;
-                    //     }
-                    //     let r = Hteapot::handle_client(stream_data, &action_clone);
-                    //     if r.is_none() {
-                    //         stream_data.status = None;
-                    //     }
-                    // }
                     streams_to_handle.retain_mut(|s| {
                         if s.status.is_none() {
                             return false;
@@ -281,12 +274,11 @@ impl Hteapot {
         socket_data: &mut SocketData,
         action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
     ) -> Option<()> {
-        // let mut reader = BufReader::new(&socket_data.stream);
-        // let mut writer = BufWriter::new(&socket_data.stream);
         let status = socket_data.status.as_mut()?;
+        let mut request = None;
         if status.reading {
             loop {
-                let mut buffer = [0; 1024];
+                let mut buffer = [0; BUFFER_SIZE];
                 match socket_data.stream.read(&mut buffer) {
                     Err(e) => match e.kind() {
                         io::ErrorKind::WouldBlock => {
@@ -301,10 +293,11 @@ impl Hteapot {
                         }
                     },
                     Ok(m) => {
-                        status.data_readed.append(&mut buffer.to_vec());
+                        request = status.request.append(buffer.to_vec());
+                        //status.data_readed.append(&mut buffer.to_vec());
                         if m == 0 {
                             return None;
-                        } else if m < 1024 {
+                        } else if m < BUFFER_SIZE || request.is_some() {
                             break;
                         }
                     }
@@ -312,18 +305,22 @@ impl Hteapot {
             }
             status.reading = false;
         }
-
-        let request_string = String::from_utf8(status.data_readed.clone());
-        let request_string = if request_string.is_err() {
-            //This proablly means the request is a https so for the moment GTFO
-            return None;
-        } else {
-            request_string.unwrap()
-        };
-        // let request_string = "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".to_string();
-        let request = Self::request_parser(request_string);
-        if request.is_err() {
-            eprintln!("Request parse error {:?}", request.err().unwrap());
+        //let request = HttpRequestBuilder::new().append(status.data_readed.clone());
+        // println!("{:?}", request);
+        // let request_string = String::from_utf8(status.data_readed.clone());
+        // let request_string = if request_string.is_err() {
+        //     //This proablly means the request is a https so for the moment GTFO
+        //     return None;
+        // } else {
+        //     request_string.unwrap()
+        // };
+        // let request = Self::request_parser(request_string);
+        // if request.is_err() {
+        //     eprintln!("Request parse error {:?}", request.err().unwrap());
+        //     return None;
+        // }
+        if request.is_none() {
+            print!("Error parsing request");
             return None;
         }
         let request = request.unwrap();
@@ -344,9 +341,13 @@ impl Hteapot {
             }
             status.data_write = response.to_bytes();
         }
-        for n in status.data_write.chunks(1024).skip(status.index_writed) {
+        for n in status
+            .data_write
+            .chunks(BUFFER_SIZE)
+            .skip(status.index_writed)
+        {
             match socket_data.stream.write(&n) {
-                Ok(size) => {
+                Ok(_size) => {
                     status.index_writed += 1;
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {

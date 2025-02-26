@@ -1,7 +1,7 @@
 use super::HttpMethod;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
