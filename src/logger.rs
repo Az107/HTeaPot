@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::io::{BufWriter, Write};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct SimpleTime;
 impl SimpleTime {
@@ -69,6 +69,12 @@ impl SimpleTime {
             year, month, day, hour, minute, second
         )
     }
+
+    pub fn get_seconds() -> u64 {
+        let now = SystemTime::now();
+        let since_epoch = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+        since_epoch.as_secs()
+    }
 }
 
 pub struct Logger<W: Sized + Write> {
@@ -83,8 +89,29 @@ impl<W: Write> Logger<W> {
         let (tx, rx) = channel::<String>();
         buffers.push(BufWriter::new(writer));
         let thread = thread::spawn(move || {
-            while let Ok(msg) = rx.recv() {
-                println!("[{}] - {}", SimpleTime::get_current_timestamp(), msg);
+            let mut last_flush = Instant::now();
+            let mut buff = Vec::new();
+            loop {
+                let msg = rx.recv_timeout(Duration::from_millis(100));
+                match msg {
+                    Ok(msg) => buff.push(format!(
+                        "[{}] - {}\n",
+                        SimpleTime::get_current_timestamp(),
+                        msg
+                    )),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => { /* No hacer nada, sigue el bucle */
+                    }
+                    Err(_) => break,
+                }
+
+                // Imprimir cada segundo o si el buffer tiene muchos logs
+                if last_flush.elapsed() >= Duration::from_secs(1) || buff.len() >= 100 {
+                    if !buff.is_empty() {
+                        print!("{}", buff.join(""));
+                        buff.clear();
+                    }
+                    last_flush = Instant::now();
+                }
             }
         });
         Logger {
@@ -102,7 +129,7 @@ impl<W: Write> Logger<W> {
     }
 
     pub fn msg(&self, content: String) {
-        self.tx.send(content);
+        let _ = self.tx.send(content);
     }
 }
 
