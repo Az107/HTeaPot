@@ -2,15 +2,18 @@ mod cache;
 mod config;
 pub mod hteapot;
 mod logger;
+mod utils;
 
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use cache::Cache;
 use config::Config;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
+use utils::get_mime_tipe;
 
 use logger::Logger;
 
@@ -39,24 +42,6 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
         }
     }
     None
-}
-
-fn get_mime_tipe(path: &String) -> String {
-    let extension = Path::new(path.as_str())
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let mimetipe = match extension {
-        "js" => "text/javascript",
-        "json" => "application/json",
-        "css" => "text/css",
-        "html" => "text/html",
-        "ico" => "image/x-icon",
-        _ => "text/plain",
-    };
-
-    mimetipe.to_string()
 }
 
 fn serve_file(path: &String) -> Option<Vec<u8>> {
@@ -119,40 +104,31 @@ fn main() {
     };
 
     let proxy_only = config.proxy_rules.get("/").is_some();
-    let logger = Mutex::new(Logger::new(io::stdout()));
+    let logger = Arc::new(Logger::new(io::stdout()));
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
     let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
-    logger.lock().expect("this doesnt work :C").msg(format!(
+    logger.msg(format!(
         "Server started at http://{}:{}",
         config.host, config.port
     ));
     if config.cache {
-        logger
-            .lock()
-            .expect("this doesnt work :C")
-            .msg("Cache Enabled".to_string());
+        logger.msg("Cache Enabled".to_string());
     }
     if proxy_only {
         logger
-            .lock()
-            .expect("this doesnt work :C")
             .msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
     }
 
+    let loggerc = logger.clone();
     server.listen(move |req| {
         // SERVER CORE
         // for each request
 
-        logger.lock().expect("this doesnt work :C").msg(format!(
-            "Request {} {}",
-            req.method.to_str(),
-            req.path
-        ));
-
+        loggerc.msg(format!("Request {} {}", req.method.to_str(), req.path));
         let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
-            let (host, proxy_req) = is_proxy.unwrap();
+            let (host, mut proxy_req) = is_proxy.unwrap();
             let res = proxy_req.brew(host.as_str());
             if res.is_ok() {
                 return res.unwrap();
@@ -172,10 +148,7 @@ fn main() {
         }
 
         if !Path::new(full_path.as_str()).exists() {
-            logger
-                .lock()
-                .expect("this doesnt work :C")
-                .msg(format!("path {} does not exist", req.path));
+            loggerc.msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
         let mimetype = get_mime_tipe(&full_path);
