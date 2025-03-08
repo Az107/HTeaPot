@@ -17,3 +17,6 @@ pub fn get_mime_tipe(path: &String) -> String {
 
     mimetipe.to_string()
 }
+
+//TODO: make a parser args to config
+//pub fn args_to_dict(list: Vec<String>) -> HashMap<String, String> {}

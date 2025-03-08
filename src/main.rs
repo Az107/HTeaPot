@@ -4,7 +4,6 @@ pub mod hteapot;
 mod logger;
 mod utils;
 
-use std::io::Write;
 use std::{fs, io};
 
 use std::path::Path;
@@ -56,61 +55,58 @@ fn serve_file(path: &String) -> Option<Vec<u8>> {
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
-    let mut serving_path = None;
-    if args.len() >= 2 {
-        match args[1].as_str() {
-            "--help" | "-h" => {
-                println!("Hteapot {}", VERSION);
-                println!("usage: {} <config file>", args[0]);
-                return;
-            }
-            "--version" | "-v" => {
-                println!("Hteapot {}", VERSION);
-                return;
-            }
-            "--serve" | "-s" => {
-                serving_path = Some(args.get(2).unwrap().clone());
-            }
-            _ => (),
-        };
+    if args.len() == 1 {
+        println!("Hteapot {}", VERSION);
+        println!("usage: {} <config file>", args[0]);
+        return;
     }
-
-    let config = if args.len() == 2 {
-        config::Config::load_config(&args[1])
-    } else if serving_path.is_some() {
-        let serving_path_str = serving_path.unwrap();
-        let serving_path_str = serving_path_str.as_str();
-        let serving_path = Path::new(serving_path_str);
-        let mut c = config::Config::new_default();
-        c.host = "0.0.0.0".to_string();
-        if serving_path.is_dir() {
-            c.root = serving_path.to_str().unwrap_or_default().to_string();
-        } else {
-            c.index = serving_path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
-            c.root = serving_path
-                .parent()
-                .unwrap_or(Path::new("./"))
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
+    let config = match args[1].as_str() {
+        "--help" | "-h" => {
+            println!("Hteapot {}", VERSION);
+            println!("usage: {} <config file>", args[0]);
+            return;
         }
-        c
-    } else {
-        config::Config::new_default()
+        "--version" | "-v" => {
+            println!("Hteapot {}", VERSION);
+            return;
+        }
+        "--serve" | "-s" => {
+            let mut c = config::Config::new_default();
+            let serving_path = Some(args.get(2).unwrap().clone());
+            let serving_path_str = serving_path.unwrap();
+            let serving_path_str = serving_path_str.as_str();
+            let serving_path = Path::new(serving_path_str);
+            if serving_path.is_dir() {
+                c.root = serving_path.to_str().unwrap_or_default().to_string();
+            } else {
+                c.index = serving_path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string();
+                c.root = serving_path
+                    .parent()
+                    .unwrap_or(Path::new("./"))
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string();
+            }
+            c.host = "0.0.0.0".to_string();
+            c
+        }
+        _ => config::Config::load_config(&args[1]),
     };
 
     let proxy_only = config.proxy_rules.get("/").is_some();
-    let file = fs::File::create("./hteapot.log");
-    if file.is_err() {
-        println!("file {:?}", file);
-    }
-    let file = file.unwrap();
-    let logger = Logger::new(file);
+    let logger = match config.log_file.clone() {
+        Some(file_name) => {
+            let file = fs::File::create(file_name.clone());
+            let file = file.unwrap();
+            Logger::new(file)
+        }
+        None => Logger::new(io::stdout()),
+    };
 
     //let logger = Logger::new(io::stdout());
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
