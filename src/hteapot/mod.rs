@@ -9,12 +9,13 @@ mod response;
 mod status;
 
 pub use self::methods::HttpMethod;
-pub use self::request::{HttpRequest, HttpRequestBuilder};
+pub use self::request::HttpRequest;
+use self::request::HttpRequestBuilder;
 pub use self::response::HttpResponse;
 pub use self::status::HttpStatus;
 
-use std::collections::{HashMap, VecDeque};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::collections::VecDeque;
+use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -188,95 +189,13 @@ impl Hteapot {
         }
     }
 
-    // Parse the request
-    pub fn request_parser(request: String) -> Result<HttpRequest, String> {
-        let mut lines = request.lines();
-        let first_line = lines.next();
-        if first_line.is_none() {
-            println!("{}", request);
-            return Err("Invalid request".to_string());
-        }
-        let first_line = first_line.unwrap();
-        let mut words = first_line.split_whitespace();
-        let method = words.next();
-        if method.is_none() {
-            return Err("Invalid method".to_string());
-        }
-        let method = method.unwrap();
-        let path = words.next();
-        if path.is_none() {
-            return Err("Invalid path".to_string());
-        }
-        let mut path = path.unwrap().to_string();
-        let mut headers: HashMap<String, String> = HashMap::new();
-        loop {
-            let line = lines.next();
-            if line.is_none() {
-                break;
-            }
-            let line = line.unwrap();
-            if line.is_empty() {
-                break;
-            }
-            let mut parts = line.split(": ");
-            let key = parts.next().unwrap().to_string();
-            let value = parts.next().unwrap();
-            headers.insert(key, value.to_string());
-        }
-        let body = lines
-            .collect::<Vec<&str>>()
-            .join("")
-            .trim()
-            .trim_end_matches(char::from(0))
-            .to_string();
-        let mut args: HashMap<String, String> = HashMap::new();
-        //remove http or https from the path
-        if path.starts_with("http://") {
-            path = path.trim_start_matches("http://").to_string();
-        } else if path.starts_with("https://") {
-            path = path.trim_start_matches("https://").to_string();
-        }
-        //remove the host name if present
-        if !path.starts_with("/") {
-            //remove all the characters until the first /
-            let mut parts = path.split("/");
-            parts.next();
-            path = parts.collect::<Vec<&str>>().join("/");
-            //add / to beggining
-            path = format!("/{}", path);
-        }
-
-        if path.contains('?') {
-            let _path = path.clone();
-            let mut parts = _path.split('?');
-            path = parts.next().unwrap().to_string();
-            let query = parts.next().unwrap();
-            let query_parts: Vec<&str> = query.split('&').collect();
-            for part in query_parts {
-                let mut parts = part.split('=');
-                let key = parts.next().unwrap().to_string();
-                let value = parts.next().unwrap_or("").to_string().replace("%22", "\"");
-                args.insert(key, value);
-            }
-        }
-
-        Ok(HttpRequest {
-            method: HttpMethod::from_str(method),
-            path: path.to_string(),
-            args,
-            headers,
-            body: body.trim_end().to_string(),
-        })
-    }
-
     // Handle the client when a request is received
     fn handle_client(
         socket_data: &mut SocketData,
         action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
     ) -> Option<()> {
         let status = socket_data.status.as_mut()?;
-        let mut request = None;
-        if status.reading {
+        if !status.request.done {
             loop {
                 let mut buffer = [0; BUFFER_SIZE];
                 match socket_data.stream.read(&mut buffer) {
@@ -293,37 +212,24 @@ impl Hteapot {
                         }
                     },
                     Ok(m) => {
-                        request = status.request.append(buffer.to_vec());
+                        status.request.append(buffer.to_vec());
                         //status.data_readed.append(&mut buffer.to_vec());
                         if m == 0 {
                             return None;
-                        } else if m < BUFFER_SIZE || request.is_some() {
+                        } else if m < BUFFER_SIZE || status.request.done {
                             break;
                         }
                     }
                 };
             }
-            status.reading = false;
         }
-        //let request = HttpRequestBuilder::new().append(status.data_readed.clone());
-        // println!("{:?}", request);
-        // let request_string = String::from_utf8(status.data_readed.clone());
-        // let request_string = if request_string.is_err() {
-        //     //This proablly means the request is a https so for the moment GTFO
-        //     return None;
-        // } else {
-        //     request_string.unwrap()
-        // };
-        // let request = Self::request_parser(request_string);
-        // if request.is_err() {
-        //     eprintln!("Request parse error {:?}", request.err().unwrap());
-        //     return None;
-        // }
+        let request = status.request.get();
         if request.is_none() {
-            print!("Error parsing request");
-            return None;
+            // println!("[hteapot] Request not ready");
+            return Some(());
         }
-        let request = request.unwrap();
+        let mut request = request.unwrap();
+        request.set_stream(socket_data.stream.try_clone().expect("Cagamos"));
         let keep_alive = match request.headers.get("Connection") {
             Some(ch) => ch == "keep-alive",
             None => false,
@@ -369,6 +275,7 @@ impl Hteapot {
             status.data_readed = vec![];
             status.data_write = vec![];
             status.index_writed = 0;
+            status.request = HttpRequestBuilder::new();
             return Some(());
         } else {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
@@ -378,18 +285,17 @@ impl Hteapot {
 }
 
 #[cfg(test)]
-#[test]
-fn test_http_parser() {
-    let request =
-        "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
-    let parsed_request = Hteapot::request_parser(request.to_string()).unwrap();
-    assert_eq!(parsed_request.method, HttpMethod::GET);
-    assert_eq!(parsed_request.path, "/");
-    assert_eq!(parsed_request.args.len(), 0);
-    assert_eq!(parsed_request.headers.len(), 3);
-    assert_eq!(parsed_request.body, "");
-}
-
+// #[test]
+// fn test_http_parser() {
+//     let request =
+//         "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.68.0\r\nAccept: */*\r\n\r\n";
+//     let parsed_request = Hteapot::request_parser(request.to_string()).unwrap();
+//     assert_eq!(parsed_request.method, HttpMethod::GET);
+//     assert_eq!(parsed_request.path, "/");
+//     assert_eq!(parsed_request.args.len(), 0);
+//     assert_eq!(parsed_request.headers.len(), 3);
+//     assert_eq!(parsed_request.body, "");
+// }
 #[test]
 fn test_http_response_maker() {
     let response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);

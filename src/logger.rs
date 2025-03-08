@@ -1,6 +1,5 @@
-use std::collections::VecDeque;
-use std::io::{BufWriter, Write};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::io::Write;
+use std::sync::mpsc::{channel, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -69,45 +68,42 @@ impl SimpleTime {
             year, month, day, hour, minute, second
         )
     }
-
-    pub fn get_seconds() -> u64 {
-        let now = SystemTime::now();
-        let since_epoch = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
-        since_epoch.as_secs()
-    }
 }
 
-pub struct Logger<W: Sized + Write> {
-    buffers: Vec<BufWriter<W>>,
+pub struct Logger {
     tx: Sender<String>,
-    thread: JoinHandle<()>,
+    _thread: JoinHandle<()>,
 }
 
-impl<W: Write> Logger<W> {
-    pub fn new(writer: W) -> Logger<W> {
-        let mut buffers = Vec::new();
+impl Logger {
+    pub fn new<W: Sized + Write + Send + Sync + 'static>(mut writer: W) -> Logger {
         let (tx, rx) = channel::<String>();
-        buffers.push(BufWriter::new(writer));
         let thread = thread::spawn(move || {
             let mut last_flush = Instant::now();
             let mut buff = Vec::new();
+            let mut max_size = 100;
+            let timeout = Duration::from_secs(1);
             loop {
-                let msg = rx.recv_timeout(Duration::from_millis(100));
+                let msg = rx.recv_timeout(timeout);
                 match msg {
-                    Ok(msg) => buff.push(format!(
-                        "[{}] - {}\n",
-                        SimpleTime::get_current_timestamp(),
-                        msg
-                    )),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => { /* No hacer nada, sigue el bucle */
-                    }
+                    Ok(msg) => buff.push(msg),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }
 
-                // Imprimir cada segundo o si el buffer tiene muchos logs
-                if last_flush.elapsed() >= Duration::from_secs(1) || buff.len() >= 100 {
+                if last_flush.elapsed() >= timeout || buff.len() >= max_size {
                     if !buff.is_empty() {
-                        print!("{}", buff.join(""));
+                        if buff.len() >= max_size {
+                            max_size = (max_size * 10).min(1_000_000);
+                        } else {
+                            max_size = (max_size / 10).max(100);
+                        }
+                        let wr = writer.write_all(buff.join("").as_bytes());
+                        if wr.is_err() {
+                            println!("{:?}", wr);
+                        }
+                        let _ = writer.flush();
+
                         buff.clear();
                     }
                     last_flush = Instant::now();
@@ -115,29 +111,22 @@ impl<W: Write> Logger<W> {
             }
         });
         Logger {
-            buffers,
             tx,
-            thread,
-        }
-    }
-
-    fn log(&mut self, content: String) {
-        for b in self.buffers.iter_mut() {
-            let _ = b.write(content.as_bytes());
-            let _ = b.flush();
+            _thread: thread,
         }
     }
 
     pub fn msg(&self, content: String) {
+        let content = format!("[{}] - {}\n", SimpleTime::get_current_timestamp(), content);
         let _ = self.tx.send(content);
     }
 }
 
-#[cfg(test)]
-use std::io::stdout;
+// #[cfg(test)]
+// use std::io::stdout;
 
-#[test]
-fn test_basic() {
-    let mut logs = Logger::new(stdout());
-    logs.msg("test".to_string());
-}
+// #[test]
+// fn test_basic() {
+//     let mut logs = Logger::new(stdout());
+//     logs.msg("test".to_string());
+// }

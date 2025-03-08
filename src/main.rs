@@ -4,10 +4,11 @@ pub mod hteapot;
 mod logger;
 mod utils;
 
-use std::fs;
-use std::io;
+use std::io::Write;
+use std::{fs, io};
+
 use std::path::Path;
-use std::sync::Arc;
+
 use std::sync::Mutex;
 
 use cache::Cache;
@@ -104,7 +105,14 @@ fn main() {
     };
 
     let proxy_only = config.proxy_rules.get("/").is_some();
-    let logger = Arc::new(Logger::new(io::stdout()));
+    let file = fs::File::create("./hteapot.log");
+    if file.is_err() {
+        println!("file {:?}", file);
+    }
+    let file = file.unwrap();
+    let logger = Logger::new(file);
+
+    //let logger = Logger::new(io::stdout());
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
     let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
     logger.msg(format!(
@@ -118,13 +126,11 @@ fn main() {
         logger
             .msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
     }
-
-    let loggerc = logger.clone();
     server.listen(move |req| {
         // SERVER CORE
         // for each request
 
-        loggerc.msg(format!("Request {} {}", req.method.to_str(), req.path));
+        logger.msg(format!("Request {} {}", req.method.to_str(), req.path));
         let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
@@ -148,7 +154,7 @@ fn main() {
         }
 
         if !Path::new(full_path.as_str()).exists() {
-            loggerc.msg(format!("path {} does not exist", req.path));
+            logger.msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
         let mimetype = get_mime_tipe(&full_path);

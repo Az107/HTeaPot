@@ -5,3 +5,4 @@ src/.DS_Store
 .idea/vcs.xml
 .idea/modules.xml
 .idea/HTeaPot.iml
+*.log

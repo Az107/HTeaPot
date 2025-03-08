@@ -1,31 +1,108 @@
 use super::HttpMethod;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    net::TcpStream,
+    str,
+};
 
-#[derive(Clone, Debug)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
     pub args: HashMap<String, String>,
     pub headers: HashMap<String, String>,
-    pub body: String,
+    pub body: Vec<u8>,
+    stream: Option<TcpStream>,
 }
 
 impl HttpRequest {
+    pub fn new(method: HttpMethod, path: &str) -> Self {
+        return HttpRequest {
+            method,
+            path: path.to_string(),
+            args: HashMap::new(),
+            headers: HashMap::new(),
+            body: Vec::new(),
+            stream: None,
+        };
+    }
+
     pub fn default() -> Self {
         HttpRequest {
             method: HttpMethod::GET,
             path: String::new(),
             args: HashMap::new(),
             headers: HashMap::new(),
-            body: String::new(),
+            body: Vec::new(),
+            stream: None,
         }
+    }
+
+    pub fn clone(&self) -> Self {
+        return HttpRequest {
+            method: self.method.clone(),
+            path: self.path.clone(),
+            args: self.args.clone(),
+            headers: self.headers.clone(),
+            body: self.body.clone(),
+            stream: None,
+        };
+    }
+
+    pub fn has_body(&self) -> bool {
+        let length = self.headers.get("Content-Length");
+        if length.is_none() {
+            return false;
+        }
+        if self.stream.is_none() && self.body.is_empty() {
+            return false;
+        }
+
+        return true;
+    }
+
+    pub fn body(&mut self) -> Option<Vec<u8>> {
+        if self.has_body() {
+            let content_length = self.headers.get("Content-Length")?;
+            let content_length: usize = content_length.parse().unwrap();
+            if content_length > self.body.len() {
+                println!("{}/{}", self.body.len(), content_length);
+                let _ = self.stream.as_ref().unwrap().flush();
+                while content_length > self.body.len() {
+                    let r = self.stream.as_ref().unwrap().read(&mut self.body);
+                    if r.is_err() {
+                        println!("Error: {:?}", r.err().unwrap());
+                    } else {
+                        if r.unwrap() == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+            Some(self.body.clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn set_stream(&mut self, stream: TcpStream) {
+        self.stream = Some(stream);
+    }
+
+    pub fn text(&mut self) -> Option<String> {
+        self.body()?;
+        let body = match str::from_utf8(self.body.as_slice()) {
+            Ok(v) => Some(v.to_string()),
+            Err(_e) => None,
+        };
+        return body;
     }
 }
 
 pub struct HttpRequestBuilder {
     request: HttpRequest,
     buffer: Vec<u8>,
-    done: bool,
+    pub done: bool,
 }
 
 impl HttpRequestBuilder {
@@ -36,15 +113,25 @@ impl HttpRequestBuilder {
                 path: String::new(),
                 args: HashMap::new(),
                 headers: HashMap::new(),
-                body: String::new(),
+                body: Vec::new(),
+                stream: None,
             },
             buffer: Vec::new(),
             done: false,
         };
     }
 
+    pub fn get(&self) -> Option<HttpRequest> {
+        if self.done {
+            return Some(self.request.clone());
+        } else {
+            None
+        }
+    }
+
     pub fn append(&mut self, buffer: Vec<u8>) -> Option<HttpRequest> {
         self.buffer.extend(buffer);
+        self.buffer.retain(|&b| b != 0);
 
         while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
             let line = self.buffer.drain(..pos).collect::<Vec<u8>>(); // Extraer línea
@@ -86,8 +173,9 @@ impl HttpRequestBuilder {
                 }
             } else {
                 // Fin de las cabeceras
+                self.request.body = self.buffer.clone();
                 self.done = true;
-                return Some(std::mem::replace(&mut self.request, HttpRequest::default()));
+                return Some(self.request.clone());
             }
         }
 
