@@ -63,22 +63,31 @@ impl HttpRequest {
 
     pub fn body(&mut self) -> Option<Vec<u8>> {
         if self.has_body() {
+            let mut stream = self.stream.as_ref().unwrap();
             let content_length = self.headers.get("Content-Length")?;
             let content_length: usize = content_length.parse().unwrap();
             if content_length > self.body.len() {
-                println!("{}/{}", self.body.len(), content_length);
-                let _ = self.stream.as_ref().unwrap().flush();
-                while content_length > self.body.len() {
-                    let r = self.stream.as_ref().unwrap().read(&mut self.body);
-                    if r.is_err() {
-                        println!("Error: {:?}", r.err().unwrap());
-                    } else {
-                        if r.unwrap() == 0 {
+                let _ = stream.flush();
+                let mut total_read = 0;
+                self.body.resize(content_length, 0);
+                while total_read < content_length {
+                    match stream.read(&mut self.body[total_read..]) {
+                        Ok(0) => {
+                            break;
+                        }
+                        Ok(n) => {
+                            total_read += n;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            continue;
+                        }
+                        Err(e) => {
                             break;
                         }
                     }
                 }
             }
+
             Some(self.body.clone())
         } else {
             None
