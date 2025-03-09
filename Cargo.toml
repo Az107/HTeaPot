@@ -1,6 +1,6 @@
 [package]
 name = "hteapot"
-version = "0.4.2"
+version = "0.5.0"                                                                                   # release candidate
 exclude = ["hteapot.toml", "public/", "readme.md"]
 license = "MIT"
 keywords = ["HTTP", "HTTP-SERVER"]
