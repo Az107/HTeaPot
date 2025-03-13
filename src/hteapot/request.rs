@@ -1,10 +1,5 @@
 use super::HttpMethod;
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    net::TcpStream,
-    str,
-};
+use std::{collections::HashMap, net::TcpStream, str};
 
 pub struct HttpRequest {
     pub method: HttpMethod,
@@ -49,57 +44,47 @@ impl HttpRequest {
         };
     }
 
-    pub fn has_body(&self) -> bool {
-        let length = self.headers.get("Content-Length");
-        if length.is_none() {
-            return false;
-        }
-        if self.stream.is_none() && self.body.is_empty() {
-            return false;
-        }
+    // pub fn body(&mut self) -> Option<Vec<u8>> {
+    //     if self.has_body() {
+    //         let mut stream = self.stream.as_ref().unwrap();
+    //         let content_length = self.headers.get("Content-Length")?;
+    //         let content_length: usize = content_length.parse().unwrap();
+    //         if content_length > self.body.len() {
+    //             let _ = stream.flush();
+    //             let mut total_read = 0;
+    //             self.body.resize(content_length, 0);
+    //             while total_read < content_length {
+    //                 match stream.read(&mut self.body[total_read..]) {
+    //                     Ok(0) => {
+    //                         break;
+    //                     }
+    //                     Ok(n) => {
+    //                         total_read += n;
+    //                     }
+    //                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+    //                         continue;
+    //                     }
+    //                     Err(_e) => {
+    //                         break;
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-        return true;
-    }
-
-    pub fn body(&mut self) -> Option<Vec<u8>> {
-        if self.has_body() {
-            let mut stream = self.stream.as_ref().unwrap();
-            let content_length = self.headers.get("Content-Length")?;
-            let content_length: usize = content_length.parse().unwrap();
-            if content_length > self.body.len() {
-                let _ = stream.flush();
-                let mut total_read = 0;
-                self.body.resize(content_length, 0);
-                while total_read < content_length {
-                    match stream.read(&mut self.body[total_read..]) {
-                        Ok(0) => {
-                            break;
-                        }
-                        Ok(n) => {
-                            total_read += n;
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            continue;
-                        }
-                        Err(e) => {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            Some(self.body.clone())
-        } else {
-            None
-        }
-    }
+    //         Some(self.body.clone())
+    //     } else {
+    //         None
+    //     }
+    // }
 
     pub fn set_stream(&mut self, stream: TcpStream) {
         self.stream = Some(stream);
     }
 
-    pub fn text(&mut self) -> Option<String> {
-        self.body()?;
+    pub fn text(&self) -> Option<String> {
+        if self.body.len() == 0 {
+            return None;
+        }
         let body = match str::from_utf8(self.body.as_slice()) {
             Ok(v) => Some(v.to_string()),
             Err(_e) => None,
@@ -111,6 +96,7 @@ impl HttpRequest {
 pub struct HttpRequestBuilder {
     request: HttpRequest,
     buffer: Vec<u8>,
+    body_size: usize,
     pub done: bool,
 }
 
@@ -125,6 +111,7 @@ impl HttpRequestBuilder {
                 body: Vec::new(),
                 stream: None,
             },
+            body_size: 0,
             buffer: Vec::new(),
             done: false,
         };
@@ -141,25 +128,22 @@ impl HttpRequestBuilder {
     pub fn append(&mut self, buffer: Vec<u8>) -> Option<HttpRequest> {
         self.buffer.extend(buffer);
         self.buffer.retain(|&b| b != 0);
-
         while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
-            let line = self.buffer.drain(..pos).collect::<Vec<u8>>(); // Extraer línea
-            self.buffer.drain(..2); // Eliminar `\r\n`
+            let line = self.buffer.drain(..pos).collect::<Vec<u8>>();
+            self.buffer.drain(..2);
 
             let line_str = String::from_utf8_lossy(&line);
 
             if self.request.path.is_empty() {
-                // Primera línea: Método + Path + Versión HTTP
                 let parts: Vec<&str> = line_str.split_whitespace().collect();
                 if parts.len() < 2 {
-                    return None; // Request malformada
+                    return None;
                 }
 
-                self.request.method = HttpMethod::from_str(parts[0]); // Convierte a enum
+                self.request.method = HttpMethod::from_str(parts[0]);
                 let path_parts: Vec<&str> = parts[1].split('?').collect();
                 self.request.path = path_parts[0].to_string();
 
-                // Si hay argumentos en la URL, los parseamos
                 if path_parts.len() > 1 {
                     self.request.args = path_parts[1]
                         .split('&')
@@ -174,20 +158,21 @@ impl HttpRequestBuilder {
                         .collect();
                 }
             } else if !line_str.is_empty() {
-                // Cabeceras HTTP
                 if let Some((key, value)) = line_str.split_once(": ") {
+                    if key.to_lowercase() == "content-length" {
+                        self.body_size = value.parse().unwrap_or(0);
+                    }
                     self.request
                         .headers
                         .insert(key.to_string(), value.to_string());
                 }
-            } else {
-                // Fin de las cabeceras
-                self.request.body = self.buffer.clone();
-                self.done = true;
-                return Some(self.request.clone());
             }
         }
-
-        None // Aún no tenemos toda la request
+        self.request.body.append(&mut self.buffer.clone());
+        if self.request.body.len() == self.body_size {
+            self.done = true;
+            return Some(self.request.clone());
+        }
+        None
     }
 }

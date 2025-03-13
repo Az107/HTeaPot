@@ -130,7 +130,7 @@ fn main() {
         let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
-            let (host, mut proxy_req) = is_proxy.unwrap();
+            let (host, proxy_req) = is_proxy.unwrap();
             let res = proxy_req.brew(host.as_str());
             if res.is_ok() {
                 return res.unwrap();

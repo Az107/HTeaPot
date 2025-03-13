@@ -21,7 +21,7 @@ impl HttpRequest {
         return self;
     }
 
-    pub fn to_string(&mut self) -> String {
+    pub fn to_string(&self) -> String {
         let path = if self.args.is_empty() {
             self.path.clone()
         } else {
@@ -44,14 +44,14 @@ impl HttpRequest {
         for (k, v) in self.headers.iter() {
             result.push_str(format!("{}: {}\r\n", k, v).as_str());
         }
-        if self.has_body() {
-            result.push_str(self.text().unwrap().as_str());
-        }
+
+        result.push_str(self.text().unwrap_or(String::new()).as_str());
+
         result.push_str("\r\n\r\n");
         result
     }
 
-    pub fn brew(&mut self, addr: &str) -> Result<HttpResponse, &'static str> {
+    pub fn brew(&self, addr: &str) -> Result<HttpResponse, &'static str> {
         let mut addr = addr.to_string();
         if addr.starts_with("http://") {
             addr = addr.strip_prefix("http://").unwrap().to_string();
@@ -97,7 +97,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_http_request_new() {
-        let mut request = HttpRequest::new(HttpMethod::GET, "/example");
+        let request = HttpRequest::new(HttpMethod::GET, "/example");
         assert_eq!(request.method, HttpMethod::GET);
         assert_eq!(request.path, "/example");
         assert!(request.args.is_empty());

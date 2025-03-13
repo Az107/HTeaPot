@@ -1,6 +1,9 @@
+use crate::HttpRequest;
+
 use super::HttpStatus;
 use super::VERSION;
 use std::collections::HashMap;
+use std::net::TcpStream;
 
 pub struct HttpResponse {
     pub status: HttpStatus,
@@ -46,7 +49,7 @@ impl HttpResponse {
         self.is_raw
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&mut self) -> Vec<u8> {
         if self.is_raw() {
             return self.raw.clone().unwrap();
         }
@@ -62,9 +65,19 @@ impl HttpResponse {
         );
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
-        response.append(&mut self.content.clone());
+        response.append(&mut self.content);
         response.push(0x0D); // Carriage Return
         response.push(0x0A); // Line Feed
         response
+    }
+}
+
+pub struct StreamedResponse {
+    stream: TcpStream,
+}
+
+impl StreamedResponse {
+    pub fn new(req: HttpRequest) -> Result<Self, &'static str> {
+        Err("Request does not have a stream")
     }
 }

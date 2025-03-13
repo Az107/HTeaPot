@@ -225,11 +225,10 @@ impl Hteapot {
         }
         let request = status.request.get();
         if request.is_none() {
-            // println!("[hteapot] Request not ready");
             return Some(());
         }
-        let mut request = request.unwrap();
-        request.set_stream(socket_data.stream.try_clone().expect("Cagamos"));
+        let request = request.unwrap();
+        //request.set_stream(socket_data.stream.try_clone().expect(""));
         let keep_alive = match request.headers.get("Connection") {
             Some(ch) => ch == "keep-alive",
             None => false,
@@ -298,7 +297,7 @@ impl Hteapot {
 // }
 #[test]
 fn test_http_response_maker() {
-    let response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
+    let mut response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response.to_bytes()).unwrap();
     let expected_response = format!("HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",VERSION);
     let expected_response_list = expected_response.split("\r\n");
