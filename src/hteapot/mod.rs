@@ -8,6 +8,8 @@ mod request;
 mod response;
 mod status;
 
+use self::response::{EmptyHttpResponse, HttpResponseConsumer};
+
 pub use self::methods::HttpMethod;
 pub use self::request::HttpRequest;
 use self::request::HttpRequestBuilder;
@@ -47,6 +49,7 @@ struct SocketStatus {
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
+    response: Box<dyn HttpResponseConsumer>,
     request: HttpRequestBuilder,
     index_writed: usize,
 }
@@ -136,6 +139,7 @@ impl Hteapot {
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
+                                response: Box::new(EmptyHttpResponse {}),
                                 request: HttpRequestBuilder::new(),
                                 index_writed: 0,
                             };
@@ -228,13 +232,12 @@ impl Hteapot {
             return Some(());
         }
         let request = request.unwrap();
-        //request.set_stream(socket_data.stream.try_clone().expect(""));
         let keep_alive = match request.headers.get("Connection") {
             Some(ch) => ch == "keep-alive",
             None => false,
         };
         if status.data_write.len() == 0 {
-            let mut response = action(request);
+            let mut response = action(request); //Call closure
             if !response.headers.contains_key("Conection") && keep_alive {
                 response
                     .headers
@@ -244,18 +247,16 @@ impl Hteapot {
                     .headers
                     .insert("Connection".to_string(), "close".to_string());
             }
-            status.data_write = response.to_bytes();
+            // status.data_write = response.to_bytes();
+            status.response = Box::new(response);
         }
-        for n in status
-            .data_write
-            .chunks(BUFFER_SIZE)
-            .skip(status.index_writed)
-        {
+        while let Ok(n) = status.response.peek() {
             match socket_data.stream.write(&n) {
                 Ok(_size) => {
-                    status.index_writed += 1;
+                    let _ = status.response.next();
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    println!("would block");
                     return Some(());
                 }
                 Err(e) => {

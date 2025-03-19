@@ -1,9 +1,8 @@
-use crate::HttpRequest;
-
 use super::HttpStatus;
 use super::VERSION;
 use std::collections::HashMap;
-use std::net::TcpStream;
+
+const BUFFER_SIZE: usize = 1024;
 
 pub struct HttpResponse {
     pub status: HttpStatus,
@@ -11,6 +10,18 @@ pub struct HttpResponse {
     pub content: Vec<u8>,
     raw: Option<Vec<u8>>,
     is_raw: bool,
+    index: usize,
+}
+
+#[derive(Debug)]
+pub enum IterError {
+    WouldBlock,
+    Finished,
+}
+
+pub trait HttpResponseConsumer {
+    fn next(&mut self) -> Result<Vec<u8>, IterError>;
+    fn peek(&mut self) -> Result<Vec<u8>, IterError>; //TODO: come up with better solution
 }
 
 impl HttpResponse {
@@ -32,6 +43,7 @@ impl HttpResponse {
             content: content.to_owned(),
             raw: None,
             is_raw: false,
+            index: 0,
         }
     }
 
@@ -42,6 +54,7 @@ impl HttpResponse {
             content: vec![],
             raw: Some(raw),
             is_raw: true,
+            index: 0,
         }
     }
 
@@ -72,12 +85,42 @@ impl HttpResponse {
     }
 }
 
-pub struct StreamedResponse {
-    stream: TcpStream,
+impl HttpResponseConsumer for HttpResponse {
+    fn next(&mut self) -> Result<Vec<u8>, IterError> {
+        let byte_chunk = self.peek()?;
+        self.index += 1;
+        return Ok(byte_chunk);
+    }
+
+    fn peek(&mut self) -> Result<Vec<u8>, IterError> {
+        if self.raw.is_none() {
+            self.raw = Some(self.to_bytes());
+        }
+        let raw = self.raw.as_ref().unwrap();
+        let mut raw = raw.chunks(BUFFER_SIZE).skip(self.index);
+        // println!("{}/{}",self.)
+        let byte_chunk = raw.next().ok_or(IterError::Finished)?.to_vec();
+        return Ok(byte_chunk);
+    }
 }
 
+pub struct EmptyHttpResponse {}
+
+impl EmptyHttpResponse {}
+impl HttpResponseConsumer for EmptyHttpResponse {
+    fn next(&mut self) -> Result<Vec<u8>, IterError> {
+        Err(IterError::Finished)
+    }
+
+    fn peek(&mut self) -> Result<Vec<u8>, IterError> {
+        Err(IterError::Finished)
+    }
+}
+
+pub struct StreamedResponse {}
+
 impl StreamedResponse {
-    pub fn new(req: HttpRequest) -> Result<Self, &'static str> {
+    pub fn new() -> Result<Self, &'static str> {
         Err("Request does not have a stream")
     }
 }
