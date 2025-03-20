@@ -4,6 +4,8 @@ pub mod hteapot;
 mod logger;
 mod utils;
 
+use std::thread;
+use std::time::Duration;
 use std::{fs, io};
 
 use std::path::Path;
@@ -12,7 +14,7 @@ use std::sync::Mutex;
 
 use cache::Cache;
 use config::Config;
-use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
+use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus, StreamedResponse};
 use utils::get_mime_tipe;
 
 use logger::Logger;
@@ -25,9 +27,6 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
         if path_match.is_some() {
             let new_path = path_match.unwrap();
             let url = config.proxy_rules.get(proxy_path).unwrap().clone();
-            // if url.ends_with('/') {
-            //     url = url.strip_suffix('/').to_owned();
-            // }
             let mut proxy_req = req.clone();
             proxy_req.path = new_path.to_string();
             proxy_req.headers.remove("Host");
@@ -125,15 +124,39 @@ fn main() {
     server.listen(move |req| {
         // SERVER CORE
         // for each request
-
         logger.msg(format!("Request {} {}", req.method.to_str(), req.path));
+        if req.path == "/_stream_test".to_string() {
+            let times = req.args.get("t");
+            let times = times.unwrap_or(&"3".to_string()).to_string();
+            let times: usize = times.parse().unwrap_or(3);
+            return StreamedResponse::new(move |sender| {
+                let data = b"abcd".to_vec();
+                for _ in 0..times {
+                    let mut response = Vec::new();
+
+                    let len_bytes = format!("{:X}\r\n", data.len()).into_bytes();
+                    response.extend(len_bytes);
+
+                    response.extend(&data);
+                    response.extend(b"\r\n");
+
+                    let _ = sender.send(response);
+                    thread::sleep(Duration::from_secs(1)); // Simula streaming
+                }
+
+                // Chunk final
+                let end = b"0\r\n\r\n".to_vec();
+                let _ = sender.send(end);
+            });
+        }
+
         let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
             let (host, proxy_req) = is_proxy.unwrap();
             let res = proxy_req.brew(host.as_str());
             if res.is_ok() {
-                return res.unwrap();
+                return Box::new(res.unwrap());
             } else {
                 return HttpResponse::new(
                     HttpStatus::InternalServerError,

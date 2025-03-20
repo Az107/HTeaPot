@@ -8,12 +8,16 @@ mod request;
 mod response;
 mod status;
 
-use self::response::{EmptyHttpResponse, HttpResponseConsumer};
+use self::response::IterError;
+
+use self::response::HttpResponseCommon;
+
+use self::response::EmptyHttpResponse;
 
 pub use self::methods::HttpMethod;
 pub use self::request::HttpRequest;
 use self::request::HttpRequestBuilder;
-pub use self::response::HttpResponse;
+pub use self::response::{HttpResponse, StreamedResponse};
 pub use self::status::HttpStatus;
 
 use std::collections::VecDeque;
@@ -49,7 +53,7 @@ struct SocketStatus {
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
-    response: Box<dyn HttpResponseConsumer>,
+    response: Box<dyn HttpResponseCommon>,
     request: HttpRequestBuilder,
     index_writed: usize,
 }
@@ -80,7 +84,10 @@ impl Hteapot {
     }
 
     // Start the server
-    pub fn listen(&self, action: impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static) {
+    pub fn listen(
+        &self,
+        action: impl Fn(HttpRequest) -> Box<dyn HttpResponseCommon> + Send + Sync + 'static,
+    ) {
         let addr = format!("{}:{}", self.address, self.port);
         let listener = TcpListener::bind(addr);
         let listener = match listener {
@@ -196,7 +203,7 @@ impl Hteapot {
     // Handle the client when a request is received
     fn handle_client(
         socket_data: &mut SocketData,
-        action: &Arc<impl Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static>,
+        action: &Arc<impl Fn(HttpRequest) -> Box<dyn HttpResponseCommon> + Send + Sync + 'static>,
     ) -> Option<()> {
         let status = socket_data.status.as_mut()?;
         if !status.request.done {
@@ -238,31 +245,40 @@ impl Hteapot {
         };
         if status.data_write.len() == 0 {
             let mut response = action(request); //Call closure
-            if !response.headers.contains_key("Conection") && keep_alive {
+            if !response.base().headers.contains_key("Conection") && keep_alive {
                 response
+                    .base()
                     .headers
                     .insert("Connection".to_string(), "keep_alive".to_string());
             } else {
                 response
+                    .base()
                     .headers
                     .insert("Connection".to_string(), "close".to_string());
             }
             // status.data_write = response.to_bytes();
-            status.response = Box::new(response);
+            status.response = response;
         }
-        while let Ok(n) = status.response.peek() {
-            match socket_data.stream.write(&n) {
-                Ok(_size) => {
-                    let _ = status.response.next();
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    println!("would block");
+        loop {
+            match status.response.peek() {
+                Ok(n) => match socket_data.stream.write(&n) {
+                    Ok(_size) => {
+                        status.data_write.append(&mut n.clone()); //TODO: yapa. better status handling
+                        let _ = status.response.next();
+                    }
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        return Some(());
+                    }
+                    Err(e) => {
+                        eprintln!("W error: {:?}", e);
+                        return None;
+                    }
+                },
+                Err(IterError::WouldBlock) => {
+                    thread::sleep(Duration::from_millis(100));
                     return Some(());
                 }
-                Err(e) => {
-                    eprintln!("W error: {:?}", e);
-                    return None;
-                }
+                Err(_) => break,
             }
         }
 
