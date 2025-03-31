@@ -130,23 +130,11 @@ fn main() {
             let times = times.unwrap_or(&"3".to_string()).to_string();
             let times: usize = times.parse().unwrap_or(3);
             return StreamedResponse::new(move |sender| {
-                let data = b"abcd".to_vec();
-                for _ in 0..times {
-                    let mut response = Vec::new();
-
-                    let len_bytes = format!("{:X}\r\n", data.len()).into_bytes();
-                    response.extend(len_bytes);
-
-                    response.extend(&data);
-                    response.extend(b"\r\n");
-
-                    let _ = sender.send(response);
-                    thread::sleep(Duration::from_secs(1)); // Simula streaming
+                for i in 0..times {
+                    let data = format!("{i}-abcd\n").as_bytes().to_vec();
+                    let _ = sender.send(data.clone());
+                    thread::sleep(Duration::from_secs(1));
                 }
-
-                // Chunk final
-                let end = b"0\r\n\r\n".to_vec();
-                let _ = sender.send(end);
             });
         }
 
@@ -156,7 +144,7 @@ fn main() {
             let (host, proxy_req) = is_proxy.unwrap();
             let res = proxy_req.brew(host.as_str());
             if res.is_ok() {
-                return Box::new(res.unwrap());
+                return res.unwrap();
             } else {
                 return HttpResponse::new(
                     HttpStatus::InternalServerError,

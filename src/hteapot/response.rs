@@ -1,8 +1,8 @@
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SendError, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
@@ -130,7 +130,6 @@ impl HttpResponseCommon for HttpResponse {
         }
         let raw = self.raw.as_ref().unwrap();
         let mut raw = raw.chunks(BUFFER_SIZE).skip(self.index);
-        // println!("{}/{}",self.)
         let byte_chunk = raw.next().ok_or(IterError::Finished)?.to_vec();
         return Ok(byte_chunk);
     }
@@ -152,15 +151,34 @@ impl HttpResponseCommon for EmptyHttpResponse {
     }
 }
 
+pub struct ChunkSender(Sender<Vec<u8>>);
+
+impl ChunkSender {
+    // fn new(sender: Sender<Vec<u8>>) -> Self {
+    //     Self(sender)
+    // }
+    pub fn send(&self, msg: Vec<u8>) -> Result<(), SendError<Vec<u8>>> {
+        let mut response = Vec::new();
+        let len_bytes = format!("{:X}\r\n", msg.len()).into_bytes();
+        response.extend(len_bytes);
+        response.extend(&msg);
+        response.extend(b"\r\n");
+        self.0.send(response)
+    }
+
+    // fn end(&self) -> Result<(), SendError<Vec<u8>>> {}
+}
+
 pub struct StreamedResponse {
     base: BaseResponse,
     receiver: Receiver<Vec<u8>>,
     has_end: Arc<AtomicBool>,
-    join_handle: JoinHandle<()>,
+    _join_handle: JoinHandle<()>,
+    queue: VecDeque<Vec<u8>>,
 }
 
 impl StreamedResponse {
-    pub fn new(action: impl Fn(Sender<Vec<u8>>) + Send + Sync + 'static) -> Box<Self> {
+    pub fn new(action: impl Fn(ChunkSender) + Send + Sync + 'static) -> Box<Self> {
         let action = Arc::new(action);
         let (tx, rx) = mpsc::channel();
         let action_clon = action.clone();
@@ -177,16 +195,19 @@ impl StreamedResponse {
         let _ = tx.send(base.to_bytes());
         let has_end = Arc::new(AtomicBool::new(false));
         let has_end_clone = has_end.clone();
+
         let jh = thread::spawn(move || {
-            action_clon(tx);
-            println!("Ended!");
+            let chunk_sender = ChunkSender(tx.clone());
+            action_clon(chunk_sender);
+            let _ = tx.clone().send(b"0\r\n\r\n".to_vec());
             has_end_clone.store(true, Ordering::SeqCst);
         });
         Box::new(StreamedResponse {
             base,
             has_end,
             receiver: rx,
-            join_handle: jh,
+            _join_handle: jh,
+            queue: VecDeque::new(),
         })
     }
 
@@ -200,20 +221,25 @@ impl HttpResponseCommon for StreamedResponse {
         &mut self.base
     }
     fn next(&mut self) -> Result<Vec<u8>, IterError> {
-        if self.has_end() {
-            return Err(IterError::Finished);
-        }
-        self.receiver
-            .recv_timeout(Duration::from_millis(100))
-            .map_err(|_| IterError::WouldBlock)
+        self.peek()
     }
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {
-        if self.has_end() {
-            return Err(IterError::Finished);
+        if self.queue.is_empty() {
+            let r = self.receiver.try_recv().map_err(|e| match e {
+                TryRecvError::Empty => IterError::WouldBlock,
+                TryRecvError::Disconnected => {
+                    if self.has_end() {
+                        IterError::Finished
+                    } else {
+                        IterError::WouldBlock
+                    }
+                }
+            })?;
+            self.queue.push_back(r.clone());
+            return Ok(r);
+        } else {
+            self.queue.pop_front().ok_or(IterError::WouldBlock)
         }
-        self.receiver
-            .recv_timeout(Duration::from_millis(100))
-            .map_err(|_| IterError::WouldBlock)
     }
 }

@@ -26,9 +26,11 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUFFER_SIZE: usize = 1024;
+const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 
 #[macro_export]
 macro_rules! headers {
@@ -50,6 +52,7 @@ pub struct Hteapot {
 
 struct SocketStatus {
     // TODO: write proper ttl
+    ttl: Instant,
     reading: bool,
     data_readed: Vec<u8>,
     data_write: Vec<u8>,
@@ -79,7 +82,6 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: if threads == 0 { 1 } else { threads },
-            //cache: HashMap::new(),
         }
     }
 
@@ -143,6 +145,7 @@ impl Hteapot {
 
                         if !pool.is_empty() {
                             let socket_status = SocketStatus {
+                                ttl: Instant::now(),
                                 reading: true,
                                 data_readed: vec![],
                                 data_write: vec![],
@@ -206,6 +209,14 @@ impl Hteapot {
         action: &Arc<impl Fn(HttpRequest) -> Box<dyn HttpResponseCommon> + Send + Sync + 'static>,
     ) -> Option<()> {
         let status = socket_data.status.as_mut()?;
+
+        // Verificar si el TTL ha expirado
+        if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL {
+            println!("TTL expirado, cerrando conexión.");
+            let _ = socket_data.stream.shutdown(Shutdown::Both);
+            return None;
+        }
+
         if !status.request.done {
             loop {
                 let mut buffer = [0; BUFFER_SIZE];
@@ -223,6 +234,7 @@ impl Hteapot {
                         }
                     },
                     Ok(m) => {
+                        status.ttl = Instant::now();
                         status.request.append(buffer.to_vec());
                         //status.data_readed.append(&mut buffer.to_vec());
                         if m == 0 {
@@ -250,6 +262,10 @@ impl Hteapot {
                     .base()
                     .headers
                     .insert("Connection".to_string(), "keep_alive".to_string());
+                response.base().headers.insert(
+                    "Keep-Alive".to_string(),
+                    format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
+                );
             } else {
                 response
                     .base()
@@ -263,7 +279,8 @@ impl Hteapot {
             match status.response.peek() {
                 Ok(n) => match socket_data.stream.write(&n) {
                     Ok(_size) => {
-                        status.data_write.append(&mut n.clone()); //TODO: yapa. better status handling
+                        status.ttl = Instant::now();
+                        status.data_write.append(&mut n.clone()); //TODO: ñapa. better status handling
                         let _ = status.response.next();
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -275,6 +292,7 @@ impl Hteapot {
                     }
                 },
                 Err(IterError::WouldBlock) => {
+                    status.ttl = Instant::now();
                     thread::sleep(Duration::from_millis(100));
                     return Some(());
                 }

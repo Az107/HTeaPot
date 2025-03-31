@@ -51,7 +51,7 @@ impl HttpRequest {
         result
     }
 
-    pub fn brew(&self, addr: &str) -> Result<HttpResponse, &'static str> {
+    pub fn brew(&self, addr: &str) -> Result<Box<HttpResponse>, &'static str> {
         let mut addr = addr.to_string();
         if addr.starts_with("http://") {
             addr = addr.strip_prefix("http://").unwrap().to_string();
@@ -79,11 +79,11 @@ impl HttpRequest {
         let mut raw: Vec<u8> = Vec::new();
         let _ = stream.read_to_end(&mut raw);
 
-        Ok(HttpResponse::new_raw(raw))
+        Ok(Box::new(HttpResponse::new_raw(raw)))
     }
 }
 
-pub fn brew(direction: &str, request: &mut HttpRequest) -> Result<HttpResponse, &'static str> {
+pub fn brew(direction: &str, request: &mut HttpRequest) -> Result<Box<HttpResponse>, &'static str> {
     return request.brew(direction);
 }
 
