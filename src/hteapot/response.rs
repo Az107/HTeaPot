@@ -2,11 +2,10 @@ use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SendError, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 pub struct BaseResponse {
     pub status: HttpStatus,

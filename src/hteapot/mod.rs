@@ -29,7 +29,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const BUFFER_SIZE: usize = 1024;
+const BUFFER_SIZE: usize = 1024 * 2;
 const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 
 #[macro_export]
@@ -54,8 +54,7 @@ struct SocketStatus {
     // TODO: write proper ttl
     ttl: Instant,
     reading: bool,
-    data_readed: Vec<u8>,
-    data_write: Vec<u8>,
+    write: bool,
     response: Box<dyn HttpResponseCommon>,
     request: HttpRequestBuilder,
     index_writed: usize,
@@ -147,8 +146,7 @@ impl Hteapot {
                             let socket_status = SocketStatus {
                                 ttl: Instant::now(),
                                 reading: true,
-                                data_readed: vec![],
-                                data_write: vec![],
+                                write: false,
                                 response: Box::new(EmptyHttpResponse {}),
                                 request: HttpRequestBuilder::new(),
                                 index_writed: 0,
@@ -211,12 +209,11 @@ impl Hteapot {
         let status = socket_data.status.as_mut()?;
 
         // Verificar si el TTL ha expirado
-        if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL {
+        if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL && !status.write {
             println!("TTL expirado, cerrando conexión.");
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
-
         if !status.request.done {
             loop {
                 let mut buffer = [0; BUFFER_SIZE];
@@ -234,8 +231,12 @@ impl Hteapot {
                         }
                     },
                     Ok(m) => {
+                        println!("bytes: {m}");
                         status.ttl = Instant::now();
-                        status.request.append(buffer.to_vec());
+                        let r = status.request.append(buffer.to_vec());
+                        if r.is_some() {
+                            break;
+                        }
                         //status.data_readed.append(&mut buffer.to_vec());
                         if m == 0 {
                             return None;
@@ -255,7 +256,7 @@ impl Hteapot {
             Some(ch) => ch == "keep-alive",
             None => false,
         };
-        if status.data_write.len() == 0 {
+        if !status.write {
             let mut response = action(request); //Call closure
             if !response.base().headers.contains_key("Conection") && keep_alive {
                 response
@@ -273,6 +274,7 @@ impl Hteapot {
                     .insert("Connection".to_string(), "close".to_string());
             }
             // status.data_write = response.to_bytes();
+            status.write = true;
             status.response = response;
         }
         loop {
@@ -280,7 +282,6 @@ impl Hteapot {
                 Ok(n) => match socket_data.stream.write(&n) {
                     Ok(_size) => {
                         status.ttl = Instant::now();
-                        status.data_write.append(&mut n.clone()); //TODO: ñapa. better status handling
                         let _ = status.response.next();
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -306,8 +307,7 @@ impl Hteapot {
         }
         if keep_alive {
             status.reading = true;
-            status.data_readed = vec![];
-            status.data_write = vec![];
+            status.write = false;
             status.index_writed = 0;
             status.request = HttpRequestBuilder::new();
             return Some(());
