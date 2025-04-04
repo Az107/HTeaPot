@@ -208,9 +208,7 @@ impl Hteapot {
     ) -> Option<()> {
         let status = socket_data.status.as_mut()?;
 
-        // Verificar si el TTL ha expirado
         if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL && !status.write {
-            println!("TTL expirado, cerrando conexión.");
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
@@ -231,7 +229,6 @@ impl Hteapot {
                         }
                     },
                     Ok(m) => {
-                        println!("bytes: {m}");
                         status.ttl = Instant::now();
                         let r = status.request.append(buffer.to_vec());
                         if r.is_some() {

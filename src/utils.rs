@@ -10,7 +10,7 @@ pub fn get_mime_tipe(path: &String) -> String {
         "js" => "text/javascript",
         "json" => "application/json",
         "css" => "text/css",
-        "html" => "text/html",
+        "html" => "text/html; charset=utf-8",
         "ico" => "image/x-icon",
         _ => "text/plain",
     };
