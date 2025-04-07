@@ -132,7 +132,7 @@ fn main() {
                 for i in 0..times {
                     let data = format!("{i}-abcd\n").as_bytes().to_vec();
                     let _ = sender.send(data.clone());
-                    //thread::sleep(Duration::from_secs(1));
+                    thread::sleep(Duration::from_secs(1));
                 }
             });
         }
