@@ -2,15 +2,20 @@ mod cache;
 mod config;
 pub mod hteapot;
 mod logger;
+mod utils;
 
-use std::fs;
-use std::io;
+use std::thread;
+use std::time::Duration;
+use std::{fs, io};
+
 use std::path::Path;
+
 use std::sync::Mutex;
 
 use cache::Cache;
 use config::Config;
-use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
+use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus, StreamedResponse};
+use utils::get_mime_tipe;
 
 use logger::Logger;
 
@@ -22,9 +27,6 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
         if path_match.is_some() {
             let new_path = path_match.unwrap();
             let url = config.proxy_rules.get(proxy_path).unwrap().clone();
-            // if url.ends_with('/') {
-            //     url = url.strip_suffix('/').to_owned();
-            // }
             let mut proxy_req = req.clone();
             proxy_req.path = new_path.to_string();
             proxy_req.headers.remove("Host");
@@ -41,24 +43,6 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
     None
 }
 
-fn get_mime_tipe(path: &String) -> String {
-    let extension = Path::new(path.as_str())
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let mimetipe = match extension {
-        "js" => "text/javascript",
-        "json" => "application/json",
-        "css" => "text/css",
-        "html" => "text/html",
-        "ico" => "image/x-icon",
-        _ => "text/plain",
-    };
-
-    mimetipe.to_string()
-}
-
 fn serve_file(path: &String) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() {
@@ -70,84 +54,88 @@ fn serve_file(path: &String) -> Option<Vec<u8>> {
 
 fn main() {
     let args = std::env::args().collect::<Vec<String>>();
-    let mut serving_path = None;
-    if args.len() >= 2 {
-        match args[1].as_str() {
-            "--help" | "-h" => {
-                println!("Hteapot {}", VERSION);
-                println!("usage: {} <config file>", args[0]);
-                return;
-            }
-            "--version" | "-v" => {
-                println!("Hteapot {}", VERSION);
-                return;
-            }
-            "--serve" | "-s" => {
-                serving_path = Some(args.get(2).unwrap().clone());
-            }
-            _ => (),
-        };
+    if args.len() == 1 {
+        println!("Hteapot {}", VERSION);
+        println!("usage: {} <config file>", args[0]);
+        return;
     }
-
-    let config = if args.len() == 2 {
-        config::Config::load_config(&args[1])
-    } else if serving_path.is_some() {
-        let serving_path_str = serving_path.unwrap();
-        let serving_path_str = serving_path_str.as_str();
-        let serving_path = Path::new(serving_path_str);
-        let mut c = config::Config::new_default();
-        c.host = "0.0.0.0".to_string();
-        if serving_path.is_dir() {
-            c.root = serving_path.to_str().unwrap_or_default().to_string();
-        } else {
-            c.index = serving_path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
-            c.root = serving_path
-                .parent()
-                .unwrap_or(Path::new("./"))
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
+    let config = match args[1].as_str() {
+        "--help" | "-h" => {
+            println!("Hteapot {}", VERSION);
+            println!("usage: {} <config file>", args[0]);
+            return;
         }
-        c
-    } else {
-        config::Config::new_default()
+        "--version" | "-v" => {
+            println!("Hteapot {}", VERSION);
+            return;
+        }
+        "--serve" | "-s" => {
+            let mut c = config::Config::new_default();
+            let serving_path = Some(args.get(2).unwrap().clone());
+            let serving_path_str = serving_path.unwrap();
+            let serving_path_str = serving_path_str.as_str();
+            let serving_path = Path::new(serving_path_str);
+            if serving_path.is_dir() {
+                c.root = serving_path.to_str().unwrap_or_default().to_string();
+            } else {
+                c.index = serving_path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string();
+                c.root = serving_path
+                    .parent()
+                    .unwrap_or(Path::new("./"))
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string();
+            }
+            c.host = "0.0.0.0".to_string();
+            c
+        }
+        _ => config::Config::load_config(&args[1]),
     };
 
     let proxy_only = config.proxy_rules.get("/").is_some();
-    let logger = Mutex::new(Logger::new(io::stdout()));
+    let logger = match config.log_file.clone() {
+        Some(file_name) => {
+            let file = fs::File::create(file_name.clone());
+            let file = file.unwrap();
+            Logger::new(file)
+        }
+        None => Logger::new(io::stdout()),
+    };
+
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
     let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
-    logger.lock().expect("this doesnt work :C").msg(format!(
+    logger.msg(format!(
         "Server started at http://{}:{}",
         config.host, config.port
     ));
     if config.cache {
-        logger
-            .lock()
-            .expect("this doesnt work :C")
-            .msg("Cache Enabled".to_string());
+        logger.msg("Cache Enabled".to_string());
     }
     if proxy_only {
         logger
-            .lock()
-            .expect("this doesnt work :C")
             .msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
     }
-
     server.listen(move |req| {
         // SERVER CORE
         // for each request
-
-        logger.lock().expect("this doesnt work :C").msg(format!(
-            "Request {} {}",
-            req.method.to_str(),
-            req.path
-        ));
+        logger.msg(format!("Request {} {}", req.method.to_str(), req.path));
+        if req.path == "/_stream_test".to_string() {
+            let times = req.args.get("t");
+            let times = times.unwrap_or(&"3".to_string()).to_string();
+            let times: usize = times.parse().unwrap_or(3);
+            return StreamedResponse::new(move |sender| {
+                for i in 0..times {
+                    let data = format!("{i}-abcd\n").as_bytes().to_vec();
+                    let _ = sender.send(data.clone());
+                    //thread::sleep(Duration::from_secs(1));
+                }
+            });
+        }
 
         let is_proxy = is_proxy(&config, req.clone());
 
@@ -172,10 +160,7 @@ fn main() {
         }
 
         if !Path::new(full_path.as_str()).exists() {
-            logger
-                .lock()
-                .expect("this doesnt work :C")
-                .msg(format!("path {} does not exist", req.path));
+            logger.msg(format!("path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
         let mimetype = get_mime_tipe(&full_path);
