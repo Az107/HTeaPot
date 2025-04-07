@@ -51,7 +51,6 @@ pub struct Hteapot {
 }
 
 struct SocketStatus {
-    // TODO: write proper ttl
     ttl: Instant,
     reading: bool,
     write: bool,
@@ -72,7 +71,6 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: 1,
-            //cache: HashMap::new(),
         }
     }
 
@@ -100,7 +98,6 @@ impl Hteapot {
         };
         let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
-        //let statusPool = Arc::new(Mutex::new(HashMap::<String, socketStatus>::new()));
         let priority_list: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
         let arc_action = Arc::new(action);
         for _tn in 0..self.threads {
@@ -109,7 +106,7 @@ impl Hteapot {
             let action_clone = arc_action.clone();
             let pl_clone = priority_list.clone();
             {
-                let mut pl_lock = pl_clone.lock().expect("Error locking prority list");
+                let mut pl_lock = pl_clone.lock().expect("Error locking priority list");
                 pl_lock.push(0);
             }
             thread::spawn(move || {
@@ -120,7 +117,7 @@ impl Hteapot {
                         let mut pool = lock.lock().expect("Error locking pool");
                         let pl_copy;
                         {
-                            let pl_lock = pl_clone.lock().expect("Error locking prority list");
+                            let pl_lock = pl_clone.lock().expect("Error locking priority list");
                             pl_copy = pl_lock.clone();
                         }
 
@@ -159,7 +156,7 @@ impl Hteapot {
 
                             {
                                 let mut pl_lock =
-                                    pl_clone.lock().expect("Errpr locking prority list");
+                                    pl_clone.lock().expect("Errpr locking priority list");
                                 pl_lock[_tn] = streams_to_handle.len();
                             }
                         }
@@ -172,7 +169,7 @@ impl Hteapot {
                         Hteapot::handle_client(s, &action_clone).is_some()
                     });
                     {
-                        let mut pl_lock = pl_clone.lock().expect("Errpr locking prority list");
+                        let mut pl_lock = pl_clone.lock().expect("Errpr locking priority list");
                         pl_lock[_tn] = streams_to_handle.len();
                     }
                 }
@@ -234,7 +231,6 @@ impl Hteapot {
                         if r.is_some() {
                             break;
                         }
-                        //status.data_readed.append(&mut buffer.to_vec());
                         if m == 0 {
                             return None;
                         } else if m < BUFFER_SIZE || status.request.done {
@@ -255,7 +251,7 @@ impl Hteapot {
         };
         if !status.write {
             let mut response = action(request); //Call closure
-            if !response.base().headers.contains_key("Conection") && keep_alive {
+            if !response.base().headers.contains_key("Connection") && keep_alive {
                 response
                     .base()
                     .headers
@@ -270,7 +266,6 @@ impl Hteapot {
                     .headers
                     .insert("Connection".to_string(), "close".to_string());
             }
-            // status.data_write = response.to_bytes();
             status.write = true;
             status.response = response;
         }
@@ -291,7 +286,7 @@ impl Hteapot {
                 },
                 Err(IterError::WouldBlock) => {
                     status.ttl = Instant::now();
-                    thread::sleep(Duration::from_millis(100));
+                    //thread::sleep(Duration::from_millis(100));
                     return Some(());
                 }
                 Err(_) => break,

@@ -107,7 +107,6 @@ fn main() {
         None => Logger::new(io::stdout()),
     };
 
-    //let logger = Logger::new(io::stdout());
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
     let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
     logger.msg(format!(
@@ -133,7 +132,7 @@ fn main() {
                 for i in 0..times {
                     let data = format!("{i}-abcd\n").as_bytes().to_vec();
                     let _ = sender.send(data.clone());
-                    thread::sleep(Duration::from_secs(1));
+                    //thread::sleep(Duration::from_secs(1));
                 }
             });
         }
