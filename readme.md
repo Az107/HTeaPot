@@ -7,17 +7,18 @@ Hteapot is a powerful, Rust-based HTTP server and library designed for high-perf
 # Features
 
 ### 1. **Threaded Architecture**
-   - Custom thread-based system, capable of handling around **70,000 requests per second**.
-   - Emphasizes resilience over peak speed, making it robust under heavy load.
+   Custom thread-based system, capable of handling around **70,000 requests per second**.
+
 
 ### 2. **Performance Under Load**
-   - Steady performance under high concurrency, managing up to **50,000 requests per second** with increased connections.
-   - Other's performance degrades significantly under high load, while Hteapot remains stable.
+   Steady performance under high concurrency, managing up to **50,000 requests per second** with increased connections.
 
 ### 3. **Low Error Rate**
    - Achieves a near **100% success rate for 200 OK responses** during stress tests, demonstrating strong resilience.
    - Outperforms others at similar loads, with minimal error rates under extreme concurrency.
 
+### 4. **Streaming Support**
+   - Supports response streaming via chunked transfer encoding, useful for large files or long-lived connections.
 
 # Use
 
@@ -51,16 +52,14 @@ For use hteapot as a library in rust
  ```
 
  2. Then you can use it in your project
-```Rust
-use hteapot::{HttpStatus, Hteapot, HttpRequest};
+```rust
+use hteapot::{HttpStatus, HttpResponse, Hteapot, HttpRequest};
 
 fn main() {
     let server = Hteapot::new("localhost", 8081);
-     teapot.listen(move|req| {
-       HttpResponse::new(HttpStatus::IAmATeapot, "Hello i am HTeaPot", None);
-
-     }
-
+    server.listen(move |req: HttpRequest| {
+        HttpResponse::new(HttpStatus::IAmATeapot, "Hello, I am HTeaPot", None)
+    });
 }
 ```
 
@@ -80,6 +79,18 @@ Run the server with a configuration file:
 Copy code
 ./target/release/hteapot <config_file_path>
 ```
+
+# Roadmap
+
+- [x] HTTP/1.1 support (keep-alive, chunked encoding)
+- [x] Multipart form handling
+- [x] Basic routing
+- [x] Library support (use as a crate)
+- [x] Streaming responses
+- [ ] HTTPS support
+- [ ] Compression (gzip/deflate)
+- [ ] WebSocket support
+- [ ] More modular architecture and documentation
 
 # Contributing
 
