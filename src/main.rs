@@ -152,7 +152,7 @@ fn main() {
                 );
             }
         }
-
+        
         let mut full_path = format!("{}{}", config.root, req.path.clone());
         if Path::new(full_path.as_str()).is_dir() {
             let separator = if full_path.ends_with('/') { "" } else { "/" };

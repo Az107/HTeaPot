@@ -1,6 +1,6 @@
 # 🍵 HteaPot HTTP Server
 
-[Spanish](docs/readme-es.md) | English
+[Spanish](docs/i8n/readme-es.md) | English
 
 Hteapot is a powerful, Rust-based HTTP server and library designed for high-performance web applications. Effortlessly serve static files and handle HTTP requests with resilience and speed.
 
@@ -11,14 +11,18 @@ Hteapot is a powerful, Rust-based HTTP server and library designed for high-perf
 
 
 ### 2. **Performance Under Load**
-   Steady performance under high concurrency, managing up to **50,000 requests per second** with increased connections.
+   Steady performance under high concurrency
+
 
 ### 3. **Low Error Rate**
    - Achieves a near **100% success rate for 200 OK responses** during stress tests, demonstrating strong resilience.
    - Outperforms others at similar loads, with minimal error rates under extreme concurrency.
 
 ### 4. **Streaming Support**
-   - Supports response streaming via chunked transfer encoding, useful for large files or long-lived connections.
+  Supports response streaming via chunked transfer encoding, useful for large files or long-lived connections.
+### 5. **Library**
+  Hteapot can be used as create library , allowing to extend or adapt it to your custom use.
+
 
 # Use
 
@@ -95,6 +99,8 @@ Copy code
 # Contributing
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
+
+[Contributor Guidelines](docs/CONSTRIBUTING.md)
 
 # License
 
