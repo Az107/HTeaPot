@@ -70,6 +70,7 @@ fn serve_file(path: &String) -> Option<Vec<u8>> {
     if r.is_ok() { Some(r.unwrap()) } else { None }
 }
 
+// Handle CGI requests if enabled
 #[cfg(feature = "cgi")]
 
 fn serve_cgi(

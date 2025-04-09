@@ -1,5 +1,5 @@
 [package]
-edition = "2024"
+edition = "2021"
 name = "hteapot"
 version = "0.5.0"
 exclude = ["config.toml", "demo/", "readme.md"]
@@ -18,3 +18,7 @@ path = "src/hteapot/mod.rs"
 
 [[bin]]
 name = "hteapot"
+
+[features]
+default = ["cgi"]  
+cgi = []  
