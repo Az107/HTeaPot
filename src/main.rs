@@ -45,11 +45,7 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
 
 fn serve_file(path: &String) -> Option<Vec<u8>> {
     let r = fs::read(path);
-    if r.is_ok() {
-        Some(r.unwrap())
-    } else {
-        None
-    }
+    if r.is_ok() { Some(r.unwrap()) } else { None }
 }
 
 fn main() {
@@ -124,19 +120,6 @@ fn main() {
         // SERVER CORE
         // for each request
         logger.msg(format!("Request {} {}", req.method.to_str(), req.path));
-        if req.path == "/_stream_test".to_string() {
-            let times = req.args.get("t");
-            let times = times.unwrap_or(&"3".to_string()).to_string();
-            let times: usize = times.parse().unwrap_or(3);
-            return StreamedResponse::new(move |sender| {
-                for i in 0..times {
-                    let data = format!("{i}-abcd\n").as_bytes().to_vec();
-                    let _ = sender.send(data.clone());
-                    thread::sleep(Duration::from_secs(1));
-                }
-            });
-        }
-
         let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
@@ -152,7 +135,7 @@ fn main() {
                 );
             }
         }
-        
+
         let mut full_path = format!("{}{}", config.root, req.path.clone());
         if Path::new(full_path.as_str()).is_dir() {
             let separator = if full_path.ends_with('/') { "" } else { "/" };
