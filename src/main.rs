@@ -4,8 +4,6 @@ pub mod hteapot;
 mod logger;
 mod utils;
 
-use std::thread;
-use std::time::Duration;
 use std::{fs, io};
 
 use std::path::Path;
@@ -14,7 +12,7 @@ use std::sync::Mutex;
 
 use cache::Cache;
 use config::Config;
-use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus, StreamedResponse};
+use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use utils::get_mime_tipe;
 
 use logger::Logger;

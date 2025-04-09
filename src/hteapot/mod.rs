@@ -211,10 +211,7 @@ impl Hteapot {
                         return None;
                     }
                     status.ttl = Instant::now();
-                    let r = status.request.append(buffer[..m].to_vec());
-                    if r.is_some() {
-                        return Some(());
-                    }
+                    let _ = status.request.append(buffer[..m].to_vec());
                 }
             }
         }
@@ -296,7 +293,10 @@ impl Hteapot {
 fn test_http_response_maker() {
     let mut response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
     let response = String::from_utf8(response.to_bytes()).unwrap();
-    let expected_response = format!("HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",VERSION);
+    let expected_response = format!(
+        "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",
+        VERSION
+    );
     let expected_response_list = expected_response.split("\r\n");
     for item in expected_response_list.into_iter() {
         assert!(response.contains(item));
