@@ -7,6 +7,7 @@ mod methods;
 mod request;
 mod response;
 mod status;
+pub mod cgi;
 
 use self::response::EmptyHttpResponse;
 use self::response::HttpResponseCommon;
