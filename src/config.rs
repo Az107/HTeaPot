@@ -34,7 +34,7 @@ impl Schema for TOMLSchema {
         r
     }
 }
-
+// Avoid removing the unused error, they're being used in different part of same file
 pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
     let mut map = HashMap::new();
     let mut submap = HashMap::new();

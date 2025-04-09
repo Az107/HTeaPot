@@ -120,6 +120,10 @@ fn serve_cgi(
     }
 }
 
+
+// Avoid removing the unused error, they're being used in different part of same file
+
+
 /// Fetches the content of a URL using a simple HTTP client.
 /// Returns the response body or an error if the request fails.
 fn fetch(url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
