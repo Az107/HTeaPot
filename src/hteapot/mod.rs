@@ -93,13 +93,17 @@ impl Hteapot {
                 return;
             }
         };
+
         let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        let priority_list: Arc<Mutex<Vec<usize>>> =
+            Arc::new(Mutex::new(vec![0; self.threads as usize]));
         let arc_action = Arc::new(action);
 
-        for _ in 0..self.threads {
+        for thread_index in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
+            let priority_list_clone = priority_list.clone();
 
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
@@ -131,6 +135,13 @@ impl Hteapot {
                         }
                     }
 
+                    {
+                        let mut priority_list = priority_list_clone
+                            .lock()
+                            .expect("Error locking priority list");
+                        priority_list[thread_index as usize] = streams_to_handle.len();
+                    }
+
                     streams_to_handle.retain_mut(|s| {
                         if s.status.is_none() {
                             return false;
@@ -151,10 +162,12 @@ impl Hteapot {
                 .set_nonblocking(true)
                 .expect("Error setting non-blocking");
             stream.set_nodelay(true).expect("Error setting no delay");
+
             {
                 let (lock, cvar) = &*pool;
                 let mut pool = lock.lock().expect("Error locking pool");
 
+                // Add the connection to the pool for the least-loaded thread
                 pool.push_front(stream);
                 cvar.notify_one();
             }
@@ -195,18 +208,17 @@ impl Hteapot {
                 },
                 Ok(m) => {
                     if m == 0 {
-                        return None; 
+                        return None;
                     }
-                    status.ttl = Instant::now(); 
+                    status.ttl = Instant::now();
                     let r = status.request.append(buffer[..m].to_vec());
                     if r.is_some() {
-                        return Some(()); 
+                        return Some(());
                     }
                 }
             }
         }
 
-       
         let request = status.request.get();
         if request.is_none() {
             return Some(());
@@ -237,8 +249,8 @@ impl Hteapot {
                     .headers
                     .insert("Connection".to_string(), "close".to_string());
             }
-            status.write = true; 
-            status.response = response; 
+            status.write = true;
+            status.response = response;
         }
 
         // Write the response to the client in chunks using the `peek` and `next` methods.
@@ -247,8 +259,8 @@ impl Hteapot {
             match status.response.peek() {
                 Ok(n) => match socket_data.stream.write(&n) {
                     Ok(_) => {
-                        status.ttl = Instant::now(); 
-                        let _ = status.response.next(); 
+                        status.ttl = Instant::now();
+                        let _ = status.response.next();
                     }
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         return Some(());
