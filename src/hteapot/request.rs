@@ -44,39 +44,6 @@ impl HttpRequest {
         };
     }
 
-    // pub fn body(&mut self) -> Option<Vec<u8>> {
-    //     if self.has_body() {
-    //         let mut stream = self.stream.as_ref().unwrap();
-    //         let content_length = self.headers.get("Content-Length")?;
-    //         let content_length: usize = content_length.parse().unwrap();
-    //         if content_length > self.body.len() {
-    //             let _ = stream.flush();
-    //             let mut total_read = 0;
-    //             self.body.resize(content_length, 0);
-    //             while total_read < content_length {
-    //                 match stream.read(&mut self.body[total_read..]) {
-    //                     Ok(0) => {
-    //                         break;
-    //                     }
-    //                     Ok(n) => {
-    //                         total_read += n;
-    //                     }
-    //                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-    //                         continue;
-    //                     }
-    //                     Err(_e) => {
-    //                         break;
-    //                     }
-    //                 }
-    //             }
-    //         }
-
-    //         Some(self.body.clone())
-    //     } else {
-    //         None
-    //     }
-    // }
-
     pub fn set_stream(&mut self, stream: TcpStream) {
         self.stream = Some(stream);
     }
@@ -125,21 +92,27 @@ impl HttpRequestBuilder {
         }
     }
 
-    pub fn append(&mut self, buffer: Vec<u8>) -> Option<HttpRequest> {
+    pub fn append(&mut self, buffer: Vec<u8>) -> Result<Option<HttpRequest>, &'static str> {
         self.buffer.extend(buffer);
         self.buffer.retain(|&b| b != 0);
         while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
             let line = self.buffer.drain(..pos).collect::<Vec<u8>>();
             self.buffer.drain(..2);
 
-            let line_str = String::from_utf8_lossy(&line);
+            let line_str = match str::from_utf8(line.as_slice()) {
+                Ok(v) => v.to_string(),
+                Err(_e) => return Err("No utf-8"),
+            };
 
             if self.request.path.is_empty() {
                 let parts: Vec<&str> = line_str.split_whitespace().collect();
                 if parts.len() < 2 {
-                    return None;
+                    return Ok(None);
                 }
 
+                if parts.len() != 3 {
+                    return Err("Invalid method + path + version request");
+                }
                 self.request.method = HttpMethod::from_str(parts[0]);
                 let path_parts: Vec<&str> = parts[1].split('?').collect();
                 self.request.path = path_parts[0].to_string();
@@ -158,8 +131,20 @@ impl HttpRequestBuilder {
                         .collect();
                 }
             } else if !line_str.is_empty() {
-                if let Some((key, value)) = line_str.split_once(": ") {
-                    if key.to_lowercase() == "content-length" {
+                if let Some((key, value)) = line_str.split_once(":") {
+                    let key = key.trim().to_lowercase();
+                    let value = value.trim();
+                    if key == "content-length" {
+                        if self.request.headers.get("content-length").is_some()
+                            || self
+                                .request
+                                .headers
+                                .get("transfer-encoding")
+                                .map(|te| te == "chunked")
+                                .unwrap_or(false)
+                        {
+                            return Err("Duplicated content-length");
+                        }
                         self.body_size = value.parse().unwrap_or(0);
                     }
                     self.request
@@ -171,8 +156,12 @@ impl HttpRequestBuilder {
         self.request.body.append(&mut self.buffer.clone());
         if self.request.body.len() == self.body_size {
             self.done = true;
-            return Some(self.request.clone());
+            return Ok(Some(self.request.clone()));
         }
-        None
+        Ok(None)
     }
 }
+
+#[cfg(test)]
+#[test]
+fn basic_request() {}
