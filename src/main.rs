@@ -19,19 +19,20 @@ use std::time::Instant;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // Safely join paths and ensure the result is within the root directory
+// Try to canonicalize to resolve any '..' components
+// Ensure the canonicalized path is still within the root directory
+// Check if the path exists before canonicalizing
 fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     let root_path = Path::new(root).canonicalize().ok()?;
     let requested_full_path = root_path.join(requested_path.trim_start_matches("/"));
     
-    // Check if the path exists before canonicalizing
     if !requested_full_path.exists() {
         return None;
     }
     
-    // Try to canonicalize to resolve any '..' components
+
     let canonical_path = requested_full_path.canonicalize().ok()?;
     
-    // Ensure the canonicalized path is still within the root directory
     if canonical_path.starts_with(&root_path) {
         Some(canonical_path)
     } else {
@@ -61,6 +62,9 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
     None
 }
 
+// Change from &string to &PathBuf cos PathBuf explicitly represents a file system path as an owned buffer,
+// making it clear that the data is intended to be a path rather than just any string. 
+// This reduces errors by enforcing the correct type for file system operations.
 fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() { Some(r.unwrap()) } else { None }
