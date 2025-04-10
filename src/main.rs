@@ -30,7 +30,6 @@ fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
         return None;
     }
     
-
     let canonical_path = requested_full_path.canonicalize().ok()?;
     
     if canonical_path.starts_with(&root_path) {
@@ -260,11 +259,8 @@ fn main() {
         
         match content {
             Some(c) => {
-                let mut headers = headers!("Content-Type" => mimetype);
-                if let Some(ref mut map) = headers {  // Unwrap the Option safely
-                    map.insert("X-Content-Type-Options".to_string(), "nosniff".to_string());
-                }
-                HttpResponse::new(HttpStatus::OK, c, headers)  // Pass the Option directly
+                let headers = headers!("Content-Type" => mimetype, "X-Content-Type-Options" => "nosniff");
+                HttpResponse::new(HttpStatus::OK, c, headers)
             },
             None => HttpResponse::new(HttpStatus::NotFound, "Not found", None),
         }
