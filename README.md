@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="README.md">English</a> |
-  <a href="README.es.md">Español</a>
+  <a href="docs/readme_i18n/README_ES.md">Español</a>
 </p>
 
 
@@ -34,7 +34,7 @@ A high-performance, lightweight HTTP server and library built in Rust. HTeaPot i
 - **Extensible Design**: Easily customize behavior for specific use cases
 - **Lightweight Footprint**: Zero dependencies and efficient resource usage
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Installation
 
@@ -101,24 +101,24 @@ fn main() {
 
 HTeaPot has been benchmarked against other popular HTTP servers, consistently demonstrating excellent metrics:
 
-| Metric | HTeaPot | Industry Average |
-|--------|---------|-----------------|
-| Requests/sec | 70,000+ | 30,000-50,000 |
-| Error rate | <0.1% | 0.5-2% |
-| Latency (p99) | 5ms | 15-30ms |
-| Memory usage | Low | Moderate |
+| Metric        | HTeaPot | Industry Average |
+|---------------|---------|------------------|
+| Requests/sec  | 70,000+ | 30,000-50,000    |
+| Error rate    | <0.1%   | 0.5-2%           |
+| Latency (p99) | 5ms     | 15-30ms          |
+| Memory usage  | Low     | Moderate         |
 
 ##  Roadmap
 
-- ✅ HTTP/1.1 support (keep-alive, chunked encoding)
-- ✅ Library API
-- ✅ Streaming responses
-- ✅ Multipart form handling
-- ✅ Basic routing system
-- 🔜 HTTPS support
-- 🔜 Compression (gzip/deflate)
-- 🔜 WebSocket support
-- 🔜 Enhanced documentation and examples
+- [x] HTTP/1.1 support (keep-alive, chunked encoding)
+- [x] Library API
+- [x] Streaming responses
+- [x] Multipart form handling
+- [x] Basic routing system
+- [ ] HTTPS support
+- [ ] Compression (gzip/deflate)
+- [ ] WebSocket support
+- [ ] Enhanced documentation and examples
 
 ##  Contributing
 
