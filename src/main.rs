@@ -65,6 +65,7 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
 // Change from &string to &PathBuf cos PathBuf explicitly represents a file system path as an owned buffer,
 // making it clear that the data is intended to be a path rather than just any string. 
 // This reduces errors by enforcing the correct type for file system operations.
+// Read more here: https://doc.rust-lang.org/std/path/index.html
 fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() { Some(r.unwrap()) } else { None }
