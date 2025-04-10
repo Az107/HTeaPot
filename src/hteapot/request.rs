@@ -1,6 +1,8 @@
 use super::HttpMethod;
 use std::{collections::HashMap, net::TcpStream, str};
 
+const MAX_HEADER_SIZE: usize = 1024 * 16;
+
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
@@ -24,7 +26,7 @@ impl HttpRequest {
 
     pub fn default() -> Self {
         HttpRequest {
-            method: HttpMethod::GET,
+            method: HttpMethod::Other(String::new()),
             path: String::new(),
             args: HashMap::new(),
             headers: HashMap::new(),
@@ -63,6 +65,7 @@ impl HttpRequest {
 pub struct HttpRequestBuilder {
     request: HttpRequest,
     buffer: Vec<u8>,
+    header_done: bool,
     body_size: usize,
     pub done: bool,
 }
@@ -78,6 +81,7 @@ impl HttpRequestBuilder {
                 body: Vec::new(),
                 stream: None,
             },
+            header_done: false,
             body_size: 0,
             buffer: Vec::new(),
             done: false,
@@ -92,9 +96,28 @@ impl HttpRequestBuilder {
         }
     }
 
+    fn read_body(&mut self) -> Option<()> {
+        self.request.body.append(&mut self.buffer.clone());
+        if self.request.body.len() == self.body_size {
+            self.done = true;
+            return Some(());
+        } else {
+            return None;
+        }
+    }
+
     pub fn append(&mut self, buffer: Vec<u8>) -> Result<Option<HttpRequest>, &'static str> {
+        if !self.header_done && self.buffer.len() > MAX_HEADER_SIZE {
+            return Err("Entity Too large");
+        }
         self.buffer.extend(buffer);
         self.buffer.retain(|&b| b != 0);
+        if self.header_done {
+            match self.read_body() {
+                Some(_) => return Ok(Some(self.request.clone())),
+                None => return Ok(None),
+            }
+        }
         while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
             let line = self.buffer.drain(..pos).collect::<Vec<u8>>();
             self.buffer.drain(..2);
@@ -151,12 +174,13 @@ impl HttpRequestBuilder {
                         .headers
                         .insert(key.to_string(), value.to_string());
                 }
+            } else {
+                self.header_done = true;
+                match self.read_body() {
+                    Some(_) => return Ok(Some(self.request.clone())),
+                    None => return Ok(None),
+                }
             }
-        }
-        self.request.body.append(&mut self.buffer.clone());
-        if self.request.body.len() == self.body_size {
-            self.done = true;
-            return Ok(Some(self.request.clone()));
         }
         Ok(None)
     }
