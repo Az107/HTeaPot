@@ -15,7 +15,8 @@ use config::Config;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use utils::get_mime_tipe;
 
-use logger::Logger;
+use logger::{Logger, LogLevel};
+use std::time::Instant;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -95,37 +96,66 @@ fn main() {
     let logger = match config.log_file.clone() {
         Some(file_name) => {
             let file = fs::File::create(file_name.clone());
-            let file = file.unwrap();
-            Logger::new(file)
+            match file {
+                Ok(file) => Logger::new(file, LogLevel::INFO, "main"),
+                Err(e) => {
+                    println!("Failed to create log file: {:?}. Using stdout instead.", e);
+                    Logger::new(io::stdout(), LogLevel::INFO, "main")
+                }
+            }
         }
-        None => Logger::new(io::stdout()),
+        None => Logger::new(io::stdout(), LogLevel::INFO, "main"),
     };
 
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));
     let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
-    logger.msg(format!(
+    logger.info(format!(
         "Server started at http://{}:{}",
         config.host, config.port
     ));
     if config.cache {
-        logger.msg("Cache Enabled".to_string());
+        logger.info("Cache Enabled".to_string());
     }
     if proxy_only {
         logger
-            .msg("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
+            .warn("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
     }
+
+    // Create component loggers
+    let proxy_logger = logger.with_component("proxy");
+    let cache_logger = logger.with_component("cache");
+    let http_logger = logger.with_component("http");
+
+
     server.listen(move |req| {
         // SERVER CORE
         // for each request
-        logger.msg(format!("Request {} {}", req.method.to_str(), req.path));
+        let start_time = Instant::now();
+        let req_method = req.method.to_str();
+        let req_path = req.path.clone();
+
+
+        http_logger.info(format!("Request {} {}", req.method.to_str(), req.path));
+
         let is_proxy = is_proxy(&config, req.clone());
 
         if proxy_only || is_proxy.is_some() {
             let (host, proxy_req) = is_proxy.unwrap();
+            proxy_logger.info(format!(
+                "Proxying request {} {} to {}",
+                req_method, req_path, host
+            ));
             let res = proxy_req.brew(host.as_str());
+            let elapsed = start_time.elapsed();
             if res.is_ok() {
-                return res.unwrap();
+                let response = res.unwrap();
+                proxy_logger.info(format!(
+                    "Proxy request processed in {:.6}ms",
+                    elapsed.as_secs_f64() * 1000.0
+                ));
+                return response;
             } else {
+                proxy_logger.error(format!("Proxy request failed: {:?}", res.err()));
                 return HttpResponse::new(
                     HttpStatus::InternalServerError,
                     "Internal Server Error",
@@ -141,23 +171,40 @@ fn main() {
         }
 
         if !Path::new(full_path.as_str()).exists() {
-            logger.msg(format!("path {} does not exist", req.path));
+            http_logger.warn(format!("Path {} does not exist", req.path));
             return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
         }
         let mimetype = get_mime_tipe(&full_path);
         let content: Option<Vec<u8>> = if config.cache {
             let mut cachee = cache.lock().expect("Error locking cache");
+            let cache_start = Instant::now();
             let mut r = cachee.get(req.path.clone());
             if r.is_none() {
+                cache_logger.debug(format!("cache miss for {}", req.path));
                 r = serve_file(&full_path);
                 if r.is_some() {
+                    cache_logger.info(format!("Adding {} to cache", req.path));
                     cachee.set(req.path.clone(), r.clone().unwrap());
                 }
+            } else {
+                cache_logger.debug(format!("cache hit for {}", req.path));
             }
+
+            let cache_elapsed = cache_start.elapsed();
+            cache_logger.debug(format!(
+                "Cache operation completed in {:.6}µs", 
+                cache_elapsed.as_micros()
+            ));
             r
         } else {
             serve_file(&full_path)
         };
+
+        let elapsed = start_time.elapsed();
+        http_logger.info(format!(
+            "Request processed in {:.6}ms",
+            elapsed.as_secs_f64() * 1000.0
+        ));
         match content {
             Some(c) => HttpResponse::new(HttpStatus::OK, c, headers!("Content-Type" => mimetype)),
             None => HttpResponse::new(HttpStatus::NotFound, "Not found", None),

@@ -2,10 +2,39 @@ use std::io::Write;
 use std::sync::mpsc::{channel, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::fmt;
+use std::sync::Arc;
+
+
+
+/// Differnt log levels
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Copy)]
+#[allow(dead_code)]
+pub enum LogLevel {
+    INFO,
+    WARN,
+    DEBUG,
+    ERROR,
+    FATAL,
+    TRACE,
+}
+
+impl fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            LogLevel::DEBUG => write!(f, "DEBUG"),
+            LogLevel::INFO => write!(f, "INFO"),
+            LogLevel::WARN => write!(f, "WARN"),
+            LogLevel::ERROR => write!(f, "ERROR"),
+            LogLevel::FATAL => write!(f, "FATAL"),
+            LogLevel::TRACE => write!(f, "TRACE"),
+        }
+    }
+}
 
 struct SimpleTime;
 impl SimpleTime {
-    fn epoch_to_ymdhms(seconds: u64) -> (i32, u32, u32, u32, u32, u32) {
+    fn epoch_to_ymdhms(seconds: u64, nanos: u32) -> (i32, u32, u32, u32, u32, u32, u32) {
         // Constants for time calculations
         const SECONDS_IN_MINUTE: u64 = 60;
         const SECONDS_IN_HOUR: u64 = 3600;
@@ -55,29 +84,51 @@ impl SimpleTime {
         let minute = ((remaining_seconds % SECONDS_IN_HOUR) / SECONDS_IN_MINUTE) as u32;
         let second = (remaining_seconds % SECONDS_IN_MINUTE) as u32;
 
-        (year, month as u32 + 1, day as u32, hour, minute, second)
+        // calculate millisecs from nanosecs
+        let millis = nanos / 1_000_000;
+
+        (year, month as u32 + 1, day as u32, hour, minute, second, millis)
     }
     pub fn get_current_timestamp() -> String {
         let now = SystemTime::now();
         let since_epoch = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
         let secs = since_epoch.as_secs();
-        let (year, month, day, hour, minute, second) = Self::epoch_to_ymdhms(secs);
+        let nanos = since_epoch.subsec_nanos();
+        let (year, month, day, hour, minute, second, millis) = Self::epoch_to_ymdhms(secs, nanos);
 
         format!(
-            "{:04}/{:02}/{:02} - {:02}:{:02}:{:02}",
-            year, month, day, hour, minute, second
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+            year, month, day, hour, minute, second, millis
         )
     }
 }
 
-pub struct Logger {
-    tx: Sender<String>,
+// Log message with metadata
+struct LogMessage {
+    timestamp: String,
+    level: LogLevel,
+    component: String,
+    content: String,
+}
+
+struct LoggerCore {
+    tx: Sender<LogMessage>,
     _thread: JoinHandle<()>,
 }
 
+pub struct Logger {
+    core: Arc<LoggerCore>,
+    component: Arc<String>,
+    min_level: LogLevel,
+}
+
 impl Logger {
-    pub fn new<W: Sized + Write + Send + Sync + 'static>(mut writer: W) -> Logger {
-        let (tx, rx) = channel::<String>();
+    pub fn new<W: Sized + Write + Send + Sync + 'static>(
+        mut writer: W,
+        min_level: LogLevel,
+        component: &str
+    ) -> Logger {
+        let (tx, rx) = channel::<LogMessage>();
         let thread = thread::spawn(move || {
             let mut last_flush = Instant::now();
             let mut buff = Vec::new();
@@ -86,7 +137,13 @@ impl Logger {
             loop {
                 let msg = rx.recv_timeout(timeout);
                 match msg {
-                    Ok(msg) => buff.push(msg),
+                    Ok(msg) => {
+                        let formatted = format!(
+                            "{} [{}] [{}] {}\n",
+                            msg.timestamp, msg.level, msg.component, msg.content
+                        );
+                        buff.push(formatted);
+                    },
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }
@@ -100,7 +157,7 @@ impl Logger {
                         }
                         let wr = writer.write_all(buff.join("").as_bytes());
                         if wr.is_err() {
-                            println!("{:?}", wr);
+                            println!("Failed to write to log: {:?}", wr);
                         }
                         let _ = writer.flush();
 
@@ -110,23 +167,85 @@ impl Logger {
                 }
             }
         });
+
         Logger {
-            tx,
-            _thread: thread,
+            core: Arc::new(LoggerCore {
+                tx,
+                _thread: thread,
+            }),
+            component: Arc::new(component.to_string()),
+            min_level,
         }
     }
 
-    pub fn msg(&self, content: String) {
-        let content = format!("[{}] - {}\n", SimpleTime::get_current_timestamp(), content);
-        let _ = self.tx.send(content);
+    // New logger with different component but sharing same output
+    pub fn with_component(&self, component: &str) -> Logger {
+        Logger {
+            core: Arc::clone(&self.core),
+            component: Arc::new(component.to_string()),
+            min_level: self.min_level,
+        }
+    }
+
+    pub fn log(&self, level: LogLevel, content: String) {
+        if level < self.min_level {
+            return;
+        }
+
+        let log_msg = LogMessage {
+            timestamp: SimpleTime::get_current_timestamp(),
+            level,
+            component: (*self.component).clone(),
+            content,
+        };
+        // Send the log message to the channel
+        let _ = self.core.tx.send(log_msg);
+    }
+
+    pub fn debug(&self, content: String) {
+        self.log(LogLevel::DEBUG, content);
+    }
+
+    /// Log a message with INFO level
+    pub fn info(&self, content: String) {
+        self.log(LogLevel::INFO, content);
+    }
+
+    /// Log a message with WARN level
+    pub fn warn(&self, content: String) {
+        self.log(LogLevel::WARN, content);
+    }
+
+    /// Log a message with ERROR level
+    pub fn error(&self, content: String) {
+        self.log(LogLevel::ERROR, content);
+    }
+
+    /// Log a message with FATAL level
+    #[allow(dead_code)]
+    pub fn fatal(&self, content: String) {
+        self.log(LogLevel::FATAL, content);
+    }
+    /// Log a message with TRACE level 
+    #[allow(dead_code)] 
+    pub fn trace(&self, content: String) {
+        self.log(LogLevel::TRACE, content);
     }
 }
 
-// #[cfg(test)]
-// use std::io::stdout;
-
-// #[test]
-// fn test_basic() {
-//     let mut logs = Logger::new(stdout());
-//     logs.msg("test".to_string());
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::stdout;
+    
+    #[test]
+    fn test_basic() {
+        let logs = Logger::new(stdout(), LogLevel::DEBUG, "test");
+        logs.info("test message".to_string());
+        logs.debug("debug info".to_string());
+        
+        // Create a sub-logger with a different component
+        let sub_logger = logs.with_component("sub-component");
+        sub_logger.warn("warning from sub-component".to_string());
+    }
+}
