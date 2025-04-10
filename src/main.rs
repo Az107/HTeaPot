@@ -87,22 +87,27 @@ fn serve_cgi(
     let query = request
         .args
         .iter()
-        .map(|(key, value)| format!("{key}={value}")) // Convierte cada par en "key=value"
-        .collect::<Vec<_>>() // Recolecta las cadenas en un Vec
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
         .join("&");
-    env::set_var("REDIRECT_STATUS", "hteapot");
-    env::set_var("SCRIPT_NAME", path);
-    env::set_var("SCRIPT_FILENAME", path);
-    env::set_var("QUERY_STRING", query);
-    env::set_var("REQUEST_METHOD", request.method.to_str()); // Método HTTP de la petición
+    unsafe {
+        //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
+        env::set_var("REDIRECT_STATUS", "hteapot");
+        env::set_var("SCRIPT_NAME", path);
+        env::set_var("SCRIPT_FILENAME", path);
+        env::set_var("QUERY_STRING", query);
+        env::set_var("REQUEST_METHOD", request.method.to_str());
+    }
     let content_type = request.headers.get("CONTENT_TYPE");
     let content_type = match content_type {
         Some(s) => s.clone(),
         None => "".to_string(),
     };
-
-    env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
-    env::set_var("CONTENT_LENGTH", request.body.len().to_string().as_str()); // Longitud del contenido para POST
+    unsafe {
+        //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
+        env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
+        env::set_var("CONTENT_LENGTH", request.body.len().to_string().as_str()); // Longitud del contenido para POST
+    }
     let mut child = Command::new(program)
         .arg(&path)
         .stdin(Stdio::piped())
@@ -112,7 +117,7 @@ fn serve_cgi(
 
     let stdin = child.stdin.as_mut().expect("msg");
     stdin
-        .write_all(request.body.as_bytes())
+        .write_all(request.body.as_slice())
         .expect("Error writing stdin");
     let output = child.wait_with_output();
     match output {
