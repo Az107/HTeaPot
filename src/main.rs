@@ -4,10 +4,8 @@ pub mod hteapot;
 mod logger;
 mod utils;
 
-use std::{fs, io};
-
+use std::{fs, io, path::PathBuf};
 use std::path::Path;
-
 use std::sync::Mutex;
 
 use cache::Cache;
@@ -19,6 +17,27 @@ use logger::{Logger, LogLevel};
 use std::time::Instant;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Safely join paths and ensure the result is within the root directory
+fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
+    let root_path = Path::new(root).canonicalize().ok()?;
+    let requested_full_path = root_path.join(requested_path.trim_start_matches("/"));
+    
+    // Check if the path exists before canonicalizing
+    if !requested_full_path.exists() {
+        return None;
+    }
+    
+    // Try to canonicalize to resolve any '..' components
+    let canonical_path = requested_full_path.canonicalize().ok()?;
+    
+    // Ensure the canonicalized path is still within the root directory
+    if canonical_path.starts_with(&root_path) {
+        Some(canonical_path)
+    } else {
+        None
+    }
+}
 
 fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> {
     for proxy_path in config.proxy_rules.keys() {
@@ -42,7 +61,7 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
     None
 }
 
-fn serve_file(path: &String) -> Option<Vec<u8>> {
+fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() { Some(r.unwrap()) } else { None }
 }
@@ -118,7 +137,7 @@ fn main() {
     }
     if proxy_only {
         logger
-            .warn("WARNING: All requests are proxied to /. Local paths won’t be used.".to_string());
+            .warn("WARNING: All requests are proxied to /. Local paths won't be used.".to_string());
     }
 
     // Create component loggers
@@ -126,14 +145,12 @@ fn main() {
     let cache_logger = logger.with_component("cache");
     let http_logger = logger.with_component("http");
 
-
     server.listen(move |req| {
         // SERVER CORE
         // for each request
         let start_time = Instant::now();
         let req_method = req.method.to_str();
         let req_path = req.path.clone();
-
 
         http_logger.info(format!("Request {} {}", req.method.to_str(), req.path));
 
@@ -164,30 +181,60 @@ fn main() {
             }
         }
 
-        let mut full_path = format!("{}{}", config.root, req.path.clone());
-        if Path::new(full_path.as_str()).is_dir() {
-            let separator = if full_path.ends_with('/') { "" } else { "/" };
-            full_path = format!("{}{}{}", full_path, separator, config.index);
-        }
+        // Safely resolve the requested path
+        let safe_path_result = if req.path == "/" {
+            // Handle root path specially
+            let root_path = Path::new(&config.root).canonicalize();
+            if root_path.is_ok() {
+                let index_path = root_path.unwrap().join(&config.index);
+                if index_path.exists() {
+                    Some(index_path)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            safe_join_paths(&config.root, &req.path)
+        };
 
-        if !Path::new(full_path.as_str()).exists() {
-            http_logger.warn(format!("Path {} does not exist", req.path));
-            return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
-        }
-        let mimetype = get_mime_tipe(&full_path);
+        // Handle directory paths
+        let safe_path = match safe_path_result {
+            Some(path) => {
+                if path.is_dir() {
+                    let index_path = path.join(&config.index);
+                    if index_path.exists() {
+                        index_path
+                    } else {
+                        http_logger.warn(format!("Index file not found in directory: {}", req.path));
+                        return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
+                    }
+                } else {
+                    path
+                }
+            },
+            None => {
+                http_logger.warn(format!("Path not found or access denied: {}", req.path));
+                return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
+            }
+        };
+
+        let mimetype = get_mime_tipe(&safe_path.to_string_lossy().to_string());
         let content: Option<Vec<u8>> = if config.cache {
             let mut cachee = cache.lock().expect("Error locking cache");
             let cache_start = Instant::now();
-            let mut r = cachee.get(req.path.clone());
+            let cache_key = req.path.clone();
+            let mut r = cachee.get(cache_key.clone());
             if r.is_none() {
-                cache_logger.debug(format!("cache miss for {}", req.path));
-                r = serve_file(&full_path);
+                cache_logger.debug(format!("cache miss for {}", cache_key));
+                r = serve_file(&safe_path);
                 if r.is_some() {
-                    cache_logger.info(format!("Adding {} to cache", req.path));
-                    cachee.set(req.path.clone(), r.clone().unwrap());
+                    cache_logger.info(format!("Adding {} to cache", cache_key));
+                    cachee.set(cache_key, r.clone().unwrap());
                 }
             } else {
-                cache_logger.debug(format!("cache hit for {}", req.path));
+                cache_logger.debug(format!("cache hit for {}", cache_key));
             }
 
             let cache_elapsed = cache_start.elapsed();
@@ -197,7 +244,7 @@ fn main() {
             ));
             r
         } else {
-            serve_file(&full_path)
+            serve_file(&safe_path)
         };
 
         let elapsed = start_time.elapsed();
@@ -205,8 +252,15 @@ fn main() {
             "Request processed in {:.6}ms",
             elapsed.as_secs_f64() * 1000.0
         ));
+        
         match content {
-            Some(c) => HttpResponse::new(HttpStatus::OK, c, headers!("Content-Type" => mimetype)),
+            Some(c) => {
+                let mut headers = headers!("Content-Type" => mimetype);
+                if let Some(ref mut map) = headers {  // Unwrap the Option safely
+                    map.insert("X-Content-Type-Options".to_string(), "nosniff".to_string());
+                }
+                HttpResponse::new(HttpStatus::OK, c, headers)  // Pass the Option directly
+            },
             None => HttpResponse::new(HttpStatus::NotFound, "Not found", None),
         }
     });
