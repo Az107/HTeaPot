@@ -250,15 +250,13 @@ impl Hteapot {
         let status = socket_data.status.as_mut()?;
 
         // Check if the TTL (time-to-live) for the connection has expired.
-        // If the connection is idle for longer than `KEEP_ALIVE_TTL` and no data is being written,
-        // the connection is gracefully shut down to free resources.
         if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL && !status.write {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
+
         // If the request is not yet complete, read data from the stream into a buffer.
         // This ensures that the server can handle partial or chunked requests.
-
         if !status.request.done {
             let mut buffer = [0; BUFFER_SIZE];
             match socket_data.stream.read(&mut buffer) {
