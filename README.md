@@ -43,7 +43,7 @@ A high-performance, lightweight HTTP server and library built in Rust. HTeaPot i
 cargo install hteapot
 
 # Or build from source
-git clone https://github.com/yourusername/hteapot.git
+git clone https://github.com/Az107/hteapot.git
 cd hteapot
 cargo build --release
 ```
