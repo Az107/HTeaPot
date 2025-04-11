@@ -1,8 +1,15 @@
+// Written by Alberto Ruiz 2025-01-01
+// This module handles the request struct and a builder for it
+// This implementation has some issues and fixes are required for security
+// Refactor is recomended, but for now can work with the fixes
+
 use super::HttpMethod;
-use std::{collections::HashMap, net::TcpStream, str};
+use std::{cmp::min, collections::HashMap, net::TcpStream, str};
 
 const MAX_HEADER_SIZE: usize = 1024 * 16;
+const MAX_HEADER_COUNT: usize = 100;
 
+#[derive(Debug)]
 pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
@@ -66,6 +73,7 @@ pub struct HttpRequestBuilder {
     request: HttpRequest,
     buffer: Vec<u8>,
     header_done: bool,
+    header_size: usize,
     body_size: usize,
     pub done: bool,
 }
@@ -81,6 +89,7 @@ impl HttpRequestBuilder {
                 body: Vec::new(),
                 stream: None,
             },
+            header_size: 0,
             header_done: false,
             body_size: 0,
             buffer: Vec::new(),
@@ -96,26 +105,43 @@ impl HttpRequestBuilder {
         }
     }
 
-    fn read_body(&mut self) -> Option<()> {
-        self.request.body.append(&mut self.buffer.clone());
-        if self.request.body.len() == self.body_size {
+    fn read_body_len(&mut self) -> Option<()> {
+        let body_left = self.body_size.saturating_sub(self.request.body.len());
+        let to_take = min(body_left, self.buffer.len());
+        let to_append = &self.buffer[..to_take];
+        self.request.body.extend_from_slice(to_append);
+        self.buffer.drain(..to_take);
+
+        if body_left > 0 {
+            return None;
+        } else {
             self.done = true;
             return Some(());
-        } else {
-            return None;
         }
     }
 
-    pub fn append(&mut self, buffer: Vec<u8>) -> Result<Option<HttpRequest>, &'static str> {
+    fn read_body_chunk(&mut self) -> Option<()> {
+        //TODO: this will support chunked body in the future
+        todo!()
+    }
+
+    fn read_body(&mut self) -> Option<()> {
+        return self.read_body_len();
+    }
+
+    pub fn append(&mut self, chunk: Vec<u8>) -> Result<(), &'static str> {
         if !self.header_done && self.buffer.len() > MAX_HEADER_SIZE {
             return Err("Entity Too large");
         }
-        self.buffer.extend(buffer);
-        self.buffer.retain(|&b| b != 0);
+        let chunk_size = chunk.len();
+        self.buffer.extend(chunk);
         if self.header_done {
-            match self.read_body() {
-                Some(_) => return Ok(Some(self.request.clone())),
-                None => return Ok(None),
+            self.read_body();
+            return Ok(());
+        } else {
+            self.header_size += chunk_size;
+            if self.header_size > MAX_HEADER_SIZE {
+                return Err("Entity Too large");
             }
         }
         while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
@@ -130,7 +156,7 @@ impl HttpRequestBuilder {
             if self.request.path.is_empty() {
                 let parts: Vec<&str> = line_str.split_whitespace().collect();
                 if parts.len() < 2 {
-                    return Ok(None);
+                    return Ok(());
                 }
 
                 if parts.len() != 3 {
@@ -155,6 +181,11 @@ impl HttpRequestBuilder {
                 }
             } else if !line_str.is_empty() {
                 if let Some((key, value)) = line_str.split_once(":") {
+                    //Check the number of headers, if the actual headers exceed that number
+                    //drop the connection
+                    if self.request.headers.len() > MAX_HEADER_COUNT {
+                        return Err("Header number exceed allowed");
+                    }
                     let key = key.trim().to_lowercase();
                     let value = value.trim();
                     if key == "content-length" {
@@ -176,13 +207,11 @@ impl HttpRequestBuilder {
                 }
             } else {
                 self.header_done = true;
-                match self.read_body() {
-                    Some(_) => return Ok(Some(self.request.clone())),
-                    None => return Ok(None),
-                }
+                self.read_body();
+                return Ok(());
             }
         }
-        Ok(None)
+        Ok(())
     }
 }
 
