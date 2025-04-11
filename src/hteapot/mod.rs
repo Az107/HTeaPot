@@ -1,5 +1,5 @@
 // Written by Alberto Ruiz 2024-03-08
-// 
+//
 // This is the HTTP server module, it will handle the requests and responses
 // Also provides utilities to parse the requests and build the response
 
@@ -17,11 +17,11 @@
 //! ```
 
 /// Submodules for HTTP functionality.
-pub mod brew;        // HTTP client implementation
-mod methods;         // HTTP method and status enums
-mod request;         // Request parsing and builder
-mod response;        // Response types and streaming
-mod status;          // Status code mapping
+pub mod brew; // HTTP client implementation
+mod methods; // HTTP method and status enums
+mod request; // Request parsing and builder
+mod response; // Response types and streaming
+mod status; // Status code mapping
 
 // Internal types used for connection management
 use self::response::{EmptyHttpResponse, HttpResponseCommon, IterError};
@@ -76,6 +76,8 @@ pub struct Hteapot {
     port: u16,
     address: String,
     threads: u16,
+    shutdown_signal: Option<Arc<AtomicBool>>,
+    shutdown_hooks: Vec<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
 /// Represents the state of a connection's lifecycle.
@@ -95,12 +97,25 @@ struct SocketData {
 }
 
 impl Hteapot {
+    pub fn set_shutdown_signal(&mut self, signal: Arc<AtomicBool>) {
+        self.shutdown_signal = Some(signal);
+    }
+
+    pub fn add_shutdown_hook<F>(&mut self, hook: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.shutdown_hooks.push(Arc::new(hook));
+    }
+
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
         Hteapot {
             port,
             address: address.to_string(),
             threads: 1,
+            shutdown_signal: None,
+            shutdown_hooks: Vec::new(),
         }
     }
 
@@ -109,6 +124,8 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: if threads == 0 { 1 } else { threads },
+            shutdown_signal: None,
+            shutdown_hooks: Vec::new(),
         }
     }
 
@@ -132,10 +149,16 @@ impl Hteapot {
             Arc::new(Mutex::new(vec![0; self.threads as usize]));
         let arc_action = Arc::new(action);
 
+        // Clone shutdown_signal and share the shutdown_hooks via Arc
+        let shutdown_signal = self.shutdown_signal.clone();
+        let shutdown_hooks = Arc::new(self.shutdown_hooks.clone());
+
         for thread_index in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
             let priority_list_clone = priority_list.clone();
+            let shutdown_signal_clone = shutdown_signal.clone();
+            let shutdown_hooks_clone = shutdown_hooks.clone();
 
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
@@ -146,8 +169,18 @@ impl Hteapot {
 
                         if streams_to_handle.is_empty() {
                             // Store the returned guard back into pool
-                            pool = cvar.wait_while(pool, |pool| pool.is_empty())
+                            pool = cvar
+                                .wait_while(pool, |pool| pool.is_empty())
                                 .expect("Error waiting on cvar");
+                        }
+
+                        if let Some(signal) = &shutdown_signal_clone {
+                            if !signal.load(Ordering::SeqCst) {
+                                for hook in shutdown_hooks_clone.iter() {
+                                    hook();
+                                }
+                                break; // Exit the server loop
+                            }
                         }
 
                         while let Some(stream) = pool.pop_back() {
@@ -216,10 +249,9 @@ impl Hteapot {
     ) -> Option<()> {
         let status = socket_data.status.as_mut()?;
 
-        // Fix by miky-rola 2025-04-08
         // Check if the TTL (time-to-live) for the connection has expired.
         // If the connection is idle for longer than `KEEP_ALIVE_TTL` and no data is being written,
-        // the connection is gracefully shut down to free resources.        
+        // the connection is gracefully shut down to free resources.
         if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL && !status.write {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
@@ -286,8 +318,7 @@ impl Hteapot {
             status.response = response;
         }
 
-        // Write the response to the client in chunks using the `peek` and `next` methods.
-        // This ensures that large responses are sent incrementally without blocking the server.
+        // Write the response to the client in chunks
         loop {
             match status.response.peek() {
                 Ok(n) => match socket_data.stream.write(&n) {
