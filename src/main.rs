@@ -174,6 +174,53 @@ fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
 /// - Optional response caching
 /// - HTTP server via [`Hteapot::new_threaded`](crate::hteapot::Hteapot::new_threaded)
 
+fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<AtomicBool> {
+    let running = Arc::new(AtomicBool::new(true));
+    let r_server = running.clone();
+    let shutdown_logger = logger.with_component("shutdown");
+
+    #[cfg(windows)]
+    {
+        let r_win = running.clone();
+        let win_logger = shutdown_logger.clone();
+
+        if !win_console::set_handler(r_win, win_logger.clone()) {
+            win_logger.error("Failed to set Windows Ctrl+C handler".to_string());
+        } else {
+            win_logger.info("Windows Ctrl+C handler registered".to_string());
+        }
+    }
+
+    let r_enter = running.clone();
+    let enter_logger = shutdown_logger.clone();
+
+    thread::spawn(move || {
+        println!(" Ctrl+C to shutdown the server gracefully...");
+        let mut buffer = String::new();
+        let _ = std::io::stdin().read_line(&mut buffer);
+        enter_logger.info("Enter pressed, initiating graceful shutdown...".to_string());
+        r_enter.store(false, Ordering::SeqCst);
+    });
+
+    // Set up server with shutdown signal
+    server.set_shutdown_signal(r_server);
+
+    // Add shutdown hook for cleanup
+    let shutdown_logger_clone = shutdown_logger.clone();
+    server.add_shutdown_hook(move || {
+        shutdown_logger_clone.info("Waiting for ongoing requests to complete...".to_string());
+
+        thread::sleep(Duration::from_secs(3));
+
+        shutdown_logger_clone.info("Server shutdown complete.".to_string());
+
+        std::process::exit(0);
+    });
+
+    // Return the running flag so the main thread can also check it
+    running
+}
+
 fn main() {
     // Parse CLI args and handle --help / --version / --serve flags
     let args = std::env::args().collect::<Vec<String>>();
