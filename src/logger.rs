@@ -103,6 +103,16 @@ impl SimpleTime {
     }
 }
 
+impl Clone for Logger {
+    fn clone(&self) -> Self {
+        Logger {
+            core: Arc::clone(&self.core),
+            component: Arc::clone(&self.component),
+            min_level: self.min_level,
+        }
+    }
+}
+
 // Log message with metadata
 struct LogMessage {
     timestamp: String,
