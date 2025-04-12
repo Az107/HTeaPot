@@ -4,14 +4,10 @@ pub mod hteapot;
 mod logger;
 mod utils;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-
 use std::{fs, io, path::PathBuf};
 use std::path::Path;
 use std::sync::Mutex;
+mod shutdown;
 
 use cache::Cache;
 use config::Config;
@@ -22,98 +18,6 @@ use logger::{Logger, LogLevel};
 use std::time::Instant;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[cfg(unix)]
-mod unix_signal {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    
-    use std::io;
-    use std::os::unix::process::CommandExt;
-    use std::process::Command;
-    
-    pub fn register_signal_handler(running: Arc<AtomicBool>, logger: crate::logger::Logger) {
-        use std::thread;
-        
-        // Create a child process that will send us a signal when its input is closed
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg("trap '' INT; read dummy; kill -INT $$")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .expect("Failed to spawn signal handler process");
-            
-        let stdin = child.stdin.take().expect("Failed to get stdin");
-        
-        // Close stdin when Ctrl+C is pressed
-        thread::spawn(move || {
-            // This thread will be interrupted when Ctrl+C is pressed
-            match io::stdin().read_line(&mut String::new()) {
-                Ok(_) => {
-                    logger.info("initiating graceful shutdown...".to_string());
-                },
-                Err(_) => {
-                    logger.info("Input interrupted, likely Ctrl+C received...".to_string());
-                }
-            }
-            
-            running.store(false, Ordering::SeqCst);
-            
-            drop(stdin);
-        });
-    }
-}
-
-#[cfg(windows)]
-mod win_console {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use std::sync::Mutex;
-
-    // Define the external Windows API function in an unsafe extern block
-    unsafe extern "system" {
-        pub fn SetConsoleCtrlHandler(
-            handler: Option<unsafe extern "system" fn(ctrl_type: u32) -> i32>,
-            add: i32,
-        ) -> i32;
-    }
-
-    pub const CTRL_C_EVENT: u32 = 0;
-
-    struct StaticData {
-        running: Option<Arc<AtomicBool>>,
-        logger: Option<crate::logger::Logger>,
-    }
-
-    // We need to ensure thread safety, so use a Mutex for it
-    static HANDLER_DATA: Mutex<StaticData> = Mutex::new(StaticData {
-        running: None,
-        logger: None,
-    });
-
-    pub fn set_handler(running: Arc<AtomicBool>, logger: crate::logger::Logger) -> bool {
-        // Store references in the mutex-protected static
-        let mut data = HANDLER_DATA.lock().unwrap();
-        data.running = Some(running);
-        data.logger = Some(logger);
-
-        unsafe extern "system" fn handler_func(ctrl_type: u32) -> i32 {
-            if ctrl_type == CTRL_C_EVENT {
-                if let Ok(data) = HANDLER_DATA.lock() {
-                    if let (Some(r), Some(l)) = (&data.running, &data.logger) {
-                        l.info("initiating graceful shutdown...".to_string());
-                        r.store(false, Ordering::SeqCst);
-                        std::process::exit(0);
-        
-                    }
-                }
-            }
-            0
-        }
-
-        unsafe { SetConsoleCtrlHandler(Some(handler_func), 1) != 0 }
-    }
-}
 
 // Safely join paths and ensure the result is within the root directory
 // Try to canonicalize to resolve any '..' components
@@ -165,53 +69,6 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
 fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() { Some(r.unwrap()) } else { None }
-}
-
-fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<AtomicBool> {
-    let running = Arc::new(AtomicBool::new(true));
-    let r_server = running.clone();
-    let shutdown_logger = logger.with_component("shutdown");
-    
-    #[cfg(windows)]
-    {
-        let r_win = running.clone();
-        let win_logger = shutdown_logger.clone();
-        
-        if !win_console::set_handler(r_win, win_logger.clone()) {
-            win_logger.error("Failed to set Windows Ctrl+C handler".to_string());
-        } else {
-            win_logger.info("Windows Ctrl+C handler registered".to_string());
-        }
-    }
-    
-    let r_enter = running.clone();
-    let enter_logger = shutdown_logger.clone();
-    
-    thread::spawn(move || {
-        println!(" Ctrl+C to shutdown the server gracefully...");
-        let mut buffer = String::new();
-        let _ = std::io::stdin().read_line(&mut buffer);
-        enter_logger.info("Enter pressed, initiating graceful shutdown...".to_string());
-        r_enter.store(false, Ordering::SeqCst);
-    });
-    
-    // Set up server with shutdown signal
-    server.set_shutdown_signal(r_server);
-    
-    // Add shutdown hook for cleanup
-    let shutdown_logger_clone = shutdown_logger.clone();
-    server.add_shutdown_hook(move || {
-        shutdown_logger_clone.info("Waiting for ongoing requests to complete...".to_string());
-        
-        thread::sleep(Duration::from_secs(3));
-        
-        shutdown_logger_clone.info("Server shutdown complete.".to_string());
-        
-        std::process::exit(0);
-    });
-    
-    // Return the running flag so the main thread can also check it
-    running
 }
 
 fn main() {
@@ -280,7 +137,7 @@ fn main() {
         "Server started at http://{}:{}",
         config.host, config.port
     ));
-    setup_graceful_shutdown(&mut server, logger.clone());
+    let _running = shutdown::setup_graceful_shutdown(&mut server, logger.clone());
     if config.cache {
         logger.info("Cache Enabled".to_string());
     }
