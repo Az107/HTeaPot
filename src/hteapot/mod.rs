@@ -180,6 +180,7 @@ impl Hteapot {
     ) -> Option<()> {
         let status = socket_data.status.as_mut()?;
 
+        // Fix by miky-rola 2025-04-08
         // Check if the TTL (time-to-live) for the connection has expired.
         // If the connection is idle for longer than `KEEP_ALIVE_TTL` and no data is being written,
         // the connection is gracefully shut down to free resources.
@@ -187,8 +188,6 @@ impl Hteapot {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
-
-        // Fix by miky-rola 2025-04-08
         // If the request is not yet complete, read data from the stream into a buffer.
         // This ensures that the server can handle partial or chunked requests.
         if !status.request.done {
@@ -213,10 +212,7 @@ impl Hteapot {
                     status.ttl = Instant::now();
                     let r = status.request.append(buffer[..m].to_vec());
                     if r.is_err() {
-                        // Fix by Alberto Ruiz 2025-04-10
                         // Early return response if not valid request is sended
-
-                        println!("Invalid request");
                         let error_msg = r.err().unwrap();
                         let response =
                             HttpResponse::new(HttpStatus::BadRequest, error_msg, None).to_bytes();
