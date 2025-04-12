@@ -188,7 +188,6 @@ impl Hteapot {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
-
         // If the request is not yet complete, read data from the stream into a buffer.
         // This ensures that the server can handle partial or chunked requests.
         if !status.request.done {
@@ -211,7 +210,17 @@ impl Hteapot {
                         return None;
                     }
                     status.ttl = Instant::now();
-                    let _ = status.request.append(buffer[..m].to_vec());
+                    let r = status.request.append(buffer[..m].to_vec());
+                    if r.is_err() {
+                        // Early return response if not valid request is sended
+                        let error_msg = r.err().unwrap();
+                        let response =
+                            HttpResponse::new(HttpStatus::BadRequest, error_msg, None).to_bytes();
+                        let _ = socket_data.stream.write(&response);
+                        let _ = socket_data.stream.flush();
+                        let _ = socket_data.stream.shutdown(Shutdown::Both);
+                        return None;
+                    }
                 }
             }
         }
@@ -224,10 +233,9 @@ impl Hteapot {
 
         let keep_alive = request
             .headers
-            .get("Connection")
-            .map(|v| v == "keep-alive")
+            .get("connection") //all headers are turn lowercase in the builder
+            .map(|v| v.to_lowercase() == "keep-alive")
             .unwrap_or(false);
-
         if !status.write {
             let mut response = action(request);
             if keep_alive {
