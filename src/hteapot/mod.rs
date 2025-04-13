@@ -1,17 +1,33 @@
 // Written by Alberto Ruiz 2024-03-08
+// 
 // This is the HTTP server module, it will handle the requests and responses
-// Also provide utilities to parse the requests and build the responses
+// Also provides utilities to parse the requests and build the response
 
-pub mod brew;
-mod methods;
-mod request;
-mod response;
-mod status;
+//! HTeaPot HTTP server core.
+//!
+//! This module provides a multithreaded HTTP/1.1 server built for performance and ease of use.
+//! It handles request parsing, response building, connection lifecycle (keep-alive)
+//! and hooks.
+//!
+//! Core types:
+//! - [`Hteapot`] — the main server entry point
+//! - [`HttpRequest`] and [`HttpResponse`] — re-exported from submodules
+//!
+//! Use [`Hteapot::listen`] to start a server with a request handler closure.
+//! ```
 
-use self::response::EmptyHttpResponse;
-use self::response::HttpResponseCommon;
-use self::response::IterError;
+/// Submodules for HTTP functionality.
+pub mod brew;        // HTTP client implementation
+mod methods;         // HTTP method and status enums
+mod request;         // Request parsing and builder
+mod response;        // Response types and streaming
+mod status;          // Status code mapping
 
+// Internal types used for connection management
+use self::response::{EmptyHttpResponse, HttpResponseCommon, IterError};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// Public API exposed by this module
 pub use self::methods::HttpMethod;
 pub use self::request::HttpRequest;
 use self::request::HttpRequestBuilder;
@@ -25,10 +41,24 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Crate version as set by `Cargo.toml`.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Size of the buffer used for reading from the TCP stream.
 const BUFFER_SIZE: usize = 1024 * 2;
+
+/// Time-to-live for keep-alive connections.
 const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 
+/// Helper macro to construct header maps.
+///
+/// # Example
+/// ```rust
+/// let headers = headers! {
+///     "Content-Type" => "text/html",
+///     "X-Custom" => "value"
+/// };
+/// ```
 #[macro_export]
 macro_rules! headers {
     ( $($k:expr => $v:expr),*) => {
@@ -47,6 +77,7 @@ pub struct Hteapot {
     threads: u16,
 }
 
+/// Represents the state of a connection's lifecycle.
 struct SocketStatus {
     ttl: Instant,
     reading: bool,
@@ -56,6 +87,7 @@ struct SocketStatus {
     index_writed: usize,
 }
 
+/// Wraps a TCP stream and its associated state.
 struct SocketData {
     stream: TcpStream,
     status: Option<SocketStatus>,
@@ -85,11 +117,10 @@ impl Hteapot {
         action: impl Fn(HttpRequest) -> Box<dyn HttpResponseCommon> + Send + Sync + 'static,
     ) {
         let addr = format!("{}:{}", self.address, self.port);
-        let listener = TcpListener::bind(addr);
-        let listener = match listener {
+        let listener = match TcpListener::bind(addr) {
             Ok(listener) => listener,
             Err(e) => {
-                eprintln!("Error L: {}", e);
+                eprintln!("Error binding to address: {}", e);
                 return;
             }
         };
@@ -113,8 +144,8 @@ impl Hteapot {
                         let mut pool = lock.lock().expect("Error locking pool");
 
                         if streams_to_handle.is_empty() {
-                            pool = cvar
-                                .wait_while(pool, |pool| pool.is_empty())
+                            // Store the returned guard back into pool
+                            pool = cvar.wait_while(pool, |pool| pool.is_empty())
                                 .expect("Error waiting on cvar");
                         }
 
@@ -153,15 +184,19 @@ impl Hteapot {
         }
 
         loop {
-            let stream = listener.accept();
-            if stream.is_err() {
+            let stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(_) => continue,
+            };
+
+            if stream.set_nonblocking(true).is_err() {
+                eprintln!("Error setting non-blocking mode on stream");
                 continue;
             }
-            let (stream, _) = stream.unwrap();
-            stream
-                .set_nonblocking(true)
-                .expect("Error setting non-blocking");
-            stream.set_nodelay(true).expect("Error setting no delay");
+            if stream.set_nodelay(true).is_err() {
+                eprintln!("Error setting no delay on stream");
+                continue;
+            }
 
             {
                 let (lock, cvar) = &*pool;
@@ -183,23 +218,20 @@ impl Hteapot {
         // Fix by miky-rola 2025-04-08
         // Check if the TTL (time-to-live) for the connection has expired.
         // If the connection is idle for longer than `KEEP_ALIVE_TTL` and no data is being written,
-        // the connection is gracefully shut down to free resources.
+        // the connection is gracefully shut down to free resources.        
         if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL && !status.write {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
         // If the request is not yet complete, read data from the stream into a buffer.
         // This ensures that the server can handle partial or chunked requests.
+
         if !status.request.done {
             let mut buffer = [0; BUFFER_SIZE];
             match socket_data.stream.read(&mut buffer) {
                 Err(e) => match e.kind() {
-                    io::ErrorKind::WouldBlock => {
-                        return Some(());
-                    }
-                    io::ErrorKind::ConnectionReset => {
-                        return None;
-                    }
+                    io::ErrorKind::WouldBlock => return Some(()),
+                    io::ErrorKind::ConnectionReset => return None,
                     _ => {
                         eprintln!("Read error: {:?}", e);
                         return None;
@@ -225,12 +257,7 @@ impl Hteapot {
             }
         }
 
-        let request = status.request.get();
-        if request.is_none() {
-            return Some(());
-        }
-        let request = request.unwrap();
-
+        let request = status.request.get()?;
         let keep_alive = request
             .headers
             .get("connection") //all headers are turn lowercase in the builder
@@ -267,9 +294,7 @@ impl Hteapot {
                         status.ttl = Instant::now();
                         let _ = status.response.next();
                     }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        return Some(());
-                    }
+                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Some(()),
                     Err(e) => {
                         eprintln!("Write error: {:?}", e);
                         return None;
@@ -297,68 +322,71 @@ impl Hteapot {
 }
 
 #[cfg(test)]
-#[test]
-fn test_http_response_maker() {
-    let mut response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
-    let response = String::from_utf8(response.to_bytes()).unwrap();
-    let expected_response = format!(
-        "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",
-        VERSION
-    );
-    let expected_response_list = expected_response.split("\r\n");
-    for item in expected_response_list.into_iter() {
-        assert!(response.contains(item));
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_http_response_maker() {
+        let mut response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
+        let response = String::from_utf8(response.to_bytes()).unwrap();
+        let expected_response = format!(
+            "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",
+            VERSION
+        );
+        let expected_response_list = expected_response.split("\r\n");
+        for item in expected_response_list {
+            assert!(response.contains(item));
+        }
     }
-}
 
-#[cfg(test)]
-#[test]
-fn test_keep_alive_connection() {
-    let mut response = HttpResponse::new(
-        HttpStatus::OK,
-        "Keep-Alive Test",
-        headers! {
-            "Connection" => "keep-alive",
-            "Content-Length" => "15"
-        },
-    );
+    #[test]
+    fn test_keep_alive_connection() {
+        let mut response = HttpResponse::new(
+            HttpStatus::OK,
+            "Keep-Alive Test",
+            headers! {
+                "Connection" => "keep-alive",
+                "Content-Length" => "15"
+            },
+        );
 
-    response.base().headers.insert(
-        "Keep-Alive".to_string(),
-        format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
-    );
+        response.base().headers.insert(
+            "Keep-Alive".to_string(),
+            format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
+        );
 
-    let response_bytes = response.to_bytes();
-    let response_str = String::from_utf8(response_bytes.clone()).unwrap();
+        let response_bytes = response.to_bytes();
+        let response_str = String::from_utf8(response_bytes.clone()).unwrap();
 
-    assert!(response_str.contains("HTTP/1.1 200 OK"));
-    assert!(response_str.contains("Content-Length: 15"));
-    assert!(response_str.contains("Connection: keep-alive"));
-    assert!(response_str.contains("Keep-Alive: timeout=10"));
-    assert!(response_str.contains("Server: HTeaPot/"));
-    assert!(response_str.contains("Keep-Alive Test"));
+        assert!(response_str.contains("HTTP/1.1 200 OK"));
+        assert!(response_str.contains("Content-Length: 15"));
+        assert!(response_str.contains("Connection: keep-alive"));
+        assert!(response_str.contains("Keep-Alive: timeout=10"));
+        assert!(response_str.contains("Server: HTeaPot/"));
+        assert!(response_str.contains("Keep-Alive Test"));
 
-    let mut second_response = HttpResponse::new(
-        HttpStatus::OK,
-        "Second Request",
-        headers! {
-            "Connection" => "keep-alive",
-            "Content-Length" => "14" // Length for "Second Request"
-        },
-    );
+        let mut second_response = HttpResponse::new(
+            HttpStatus::OK,
+            "Second Request",
+            headers! {
+                "Connection" => "keep-alive",
+                "Content-Length" => "14" // Length for "Second Request"
+            },
+        );
 
-    second_response.base().headers.insert(
-        "Keep-Alive".to_string(),
-        format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
-    );
+        second_response.base().headers.insert(
+            "Keep-Alive".to_string(),
+            format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
+        );
 
-    let second_response_bytes = second_response.to_bytes();
-    let second_response_str = String::from_utf8(second_response_bytes.clone()).unwrap();
+        let second_response_bytes = second_response.to_bytes();
+        let second_response_str = String::from_utf8(second_response_bytes.clone()).unwrap();
 
-    assert!(second_response_str.contains("HTTP/1.1 200 OK"));
-    assert!(second_response_str.contains("Content-Length: 14"));
-    assert!(second_response_str.contains("Connection: keep-alive"));
-    assert!(second_response_str.contains("Keep-Alive: timeout=10"));
-    assert!(second_response_str.contains("Server: HTeaPot/"));
-    assert!(second_response_str.contains("Second Request"));
+        assert!(second_response_str.contains("HTTP/1.1 200 OK"));
+        assert!(second_response_str.contains("Content-Length: 14"));
+        assert!(response_str.contains("Connection: keep-alive"));
+        assert!(response_str.contains("Keep-Alive: timeout=10"));
+        assert!(response_str.contains("Server: HTeaPot/"));
+        assert!(second_response_str.contains("Second Request"));
+    }
 }
