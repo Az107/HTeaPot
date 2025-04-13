@@ -67,36 +67,25 @@ pub mod unix_signal {
     use std::ptr;
     use std::mem;
     
-    use libc::{c_int, c_void, sigaction, sighandler_t, sigset_t};
-    use libc::{SA_RESTART, SIGINT, SIG_IGN};
+    use libc::{c_int, sigaction, sighandler_t, sigset_t};
+    use libc::{SA_RESTART, SIGINT};
     
     use crate::logger::Logger;
     
-    // Global variables to store the signal handler state
-    static mut RUNNING: Option<Arc<AtomicBool>> = None;
-    static mut LOGGER: Option<Logger> = None;
+    // Thread-safe flag to indicate signal received
+    static mut SIGNAL_RECEIVED: bool = false;
     
-    // Signal handler function
+    // Signal handler function - minimal to avoid UB
     extern "C" fn handle_signal(_: c_int) {
         unsafe {
-            if let Some(running) = RUNNING.as_ref() {
-                if let Some(logger) = LOGGER.as_ref() {
-                    logger.info("SIGINT received, initiating graceful shutdown...".to_string());
-                }
-                running.store(false, Ordering::SeqCst);
-            }
+            SIGNAL_RECEIVED = true;
         }
     }
     
     pub fn register_signal_handler(running: Arc<AtomicBool>, logger: Logger) {
         unsafe {
-            // Store our state in global variables
-            RUNNING = Some(running);
-            LOGGER = Some(logger.clone());
-            
             // Set up the sigaction struct
             let mut sigact: sigaction = mem::zeroed();
-            // Fix: Use the correct field name for the handler
             sigact.sa_sigaction = handle_signal as sighandler_t;
             sigact.sa_flags = SA_RESTART;
             
@@ -106,18 +95,32 @@ pub mod unix_signal {
             // Register our signal handler for SIGINT
             if sigaction(SIGINT, &sigact, ptr::null_mut()) < 0 {
                 logger.error("Failed to set SIGINT handler".to_string());
+                return;
             } else {
                 logger.info("SIGINT handler registered".to_string());
             }
         }
+        
+        // Start a monitoring thread that periodically checks the signal flag
+        // and updates the running atomic
+        let monitor_logger = logger.clone();
+        std::thread::spawn(move || {
+            while running.load(Ordering::SeqCst) {
+                unsafe {
+                    if SIGNAL_RECEIVED {
+                        monitor_logger.info("SIGINT received, initiating graceful shutdown...".to_string());
+                        running.store(false, Ordering::SeqCst);
+                        break;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        });
     }
     
     // Helper function to create an empty signal set
     unsafe fn sigemptyset(set: *mut sigset_t) {
-        // Fix: Add unsafe block around the unsafe operation
-        unsafe {
-            ptr::write_bytes(set, 0, 1);
-        }
+        ptr::write_bytes(set, 0, 1);
     }
 }
 
