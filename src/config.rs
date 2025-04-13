@@ -1,9 +1,15 @@
 // Written by Alberto Ruiz 2024-04-07 (Happy 3th monthsary)
-// This is the config module, it will load the configuration
-// file and provide the settings
+// 
+// This is the config module: responsible for loading application configuration
+// from a file and providing structured access to settings.
 
 use std::{any::Any, collections::HashMap, fs};
 
+/// Dynamic TOML value representation.
+///
+/// Each parsed TOML key is stored as a `TOMLtype`, which can be a string,
+/// number, float, or boolean. This allows the custom parser to support basic
+/// TOML configuration without external dependencies.
 #[derive(Clone, Debug)]
 pub enum TOMLtype {
     Text(String),
@@ -12,8 +18,12 @@ pub enum TOMLtype {
     Boolean(bool),
 }
 
+/// A section of the parsed TOML file, keyed by strings and holding `TOMLtype` values.
 type TOMLSchema = HashMap<String, TOMLtype>;
+
+/// Trait for safely extracting typed values from a `TOMLSchema`.
 trait Schema {
+    /// Attempts to retrieve a value of type `T` from the schema by key.
     fn get2<T: 'static + Clone>(&self, key: &str) -> Option<T>;
 }
 
@@ -21,12 +31,16 @@ impl Schema for TOMLSchema {
     fn get2<T: 'static + Clone>(&self, key: &str) -> Option<T> {
         let value = self.get(key)?;
         let value = value.clone();
+
+        // Convert the TOMLtype to a dynamically typed value
         let any_value: Box<dyn Any> = match value {
             TOMLtype::Text(d) => Box::new(d),
             TOMLtype::Number(d) => Box::new(d),
             TOMLtype::Float(d) => Box::new(d),
             TOMLtype::Boolean(d) => Box::new(d),
         };
+
+        // Try to downcast to the requested type
         let r = any_value.downcast_ref::<T>().cloned();
         if r.is_none() {
             println!("{} is none", key);
@@ -35,22 +49,37 @@ impl Schema for TOMLSchema {
     }
 }
 
+/// Parses a TOML-like string into a nested `HashMap` structure.
+///
+/// This is a minimal, custom TOML parser that supports:
+/// - Sections (e.g., `[HTEAPOT]`)
+/// - Key-value pairs with types: string, bool, u16, f64
+/// - Ignores comments and blank lines
+///
+/// # Panics
+/// Panics if a numeric or float value fails to parse.
 pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
     let mut map = HashMap::new();
     let mut submap = HashMap::new();
     let mut title = "".to_string();
+    
     let lines = content.split("\n");
     for line in lines {
         if line.starts_with("#") || line.is_empty() {
             continue;
         }
+
+        // Remove trailing inline comments
         let line = if line.contains('#') {
             let parts = line.split("#").collect::<Vec<&str>>();
             parts[0].trim()
         } else {
             line.trim()
         };
+
+        // Skip empty lines
         if line.starts_with("[") && line.ends_with("]") {
+            // New section starts
             let key = line.trim_matches('[').trim_matches(']').trim();
             if submap.len() != 0 && title.len() != 0 {
                 map.insert(title.clone(), submap.clone());
@@ -59,10 +88,14 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
             submap = HashMap::new();
             continue;
         }
+        
+        // Split key and value
         let parts = line.split("=").collect::<Vec<&str>>();
         if parts.len() != 2 {
             continue;
         }
+        
+        // Remove leading and trailing whitespace
         let key = parts[0]
             .trim()
             .trim_end_matches('"')
@@ -70,6 +103,8 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
         if key.is_empty() {
             continue;
         }
+        
+        // Remove leading and trailing whitespace
         let value = parts[1].trim();
         let value = if value.contains('\'') || value.contains('"') {
             let value = value.trim_matches('"').trim();
@@ -90,23 +125,42 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
             }
             TOMLtype::Number(value.unwrap())
         };
+
+        // Suggested alternative parsing logic
+        // let value = if value.contains('\'') || value.contains('"') {
+        //     TOMLtype::Text(value.trim_matches('"').to_string())
+        // } else if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false") {
+        //     TOMLtype::Boolean(value.eq_ignore_ascii_case("true"))
+        // } else if value.contains('.') {
+        //     TOMLtype::Float(value.parse().expect("Error parsing float"))
+        // } else {
+        //     TOMLtype::Number(value.parse().expect("Error parsing number"))
+        // };
+
+        // Insert the key-value pair into the submap
         submap.insert(key.to_string(), value);
     }
+
+    // Insert the last section if it exists
     map.insert(title, submap.clone());
     map
 }
 
+/// Configuration for the HTeaPot server.
+///
+/// This struct holds the runtime settings for the server,
+/// such as host, port, caching behavior, and proxy rules.
 #[derive(Debug)]
 pub struct Config {
-    pub port: u16,    // Port number to listen
-    pub host: String, // Host name or IP
-    pub root: String, // Root directory to serve files
+    pub port: u16,        // Port number to listen
+    pub host: String,     // Host name or IP
+    pub root: String,     // Root directory to serve files
     pub cache: bool,
     pub cache_ttl: u16,
     pub threads: u16,
     pub log_file: Option<String>,
-    pub index: String, // Index file to serve by default
-    //pub error: String, // Error file to serve when a file is not found
+    pub index: String,    // Index file to serve by default
+    // pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>,
 }
 
@@ -122,6 +176,7 @@ impl Config {
     //     }
     //   }
 
+    /// Returns a default configuration with sensible values.
     pub fn new_default() -> Config {
         Config {
             port: 8080,
@@ -137,13 +192,21 @@ impl Config {
         }
     }
 
+    /// Loads configuration from a TOML file, returning defaults on failure.
+    ///
+    /// Expects the file to contain `[HTEAPOT]` and optionally `[proxy]` sections.
+    /// Supports type-safe extraction for each expected key.
     pub fn load_config(path: &str) -> Config {
         let content = fs::read_to_string(path);
         if content.is_err() {
             return Config::new_default();
         }
+
+        // Read the file content
         let content = content.unwrap();
         let map = toml_parser(&content);
+
+        // Extract proxy rules
         let mut proxy_rules: HashMap<String, String> = HashMap::new();
         let proxy_map = map.get("proxy");
         if proxy_map.is_some() {
@@ -151,7 +214,7 @@ impl Config {
             for k in proxy_map.keys() {
                 let url = proxy_map.get2(k);
                 if url.is_none() {
-                    println!();
+                    println!("Missing or invalid proxy URL for key: {}", k);
                     continue;
                 }
                 let url = url.unwrap();
@@ -159,7 +222,24 @@ impl Config {
             }
         }
 
+        // Suggested alternative parsing logic
+        // if let Some(proxy_map) = map.get("proxy") {
+            // for k in proxy_map.keys() {
+                // if let Some(url) = proxy_map.get2(k) {
+                    // proxy_rules.insert(k.clone(), url);
+                // } else {
+                    // println!("Missing or invalid proxy URL for key: {}", k);
+                // }
+            // }
+        // }
+
+        // Extract main configuration
         let map = map.get("HTEAPOT").unwrap();
+
+        // Suggested alternative parsing logic (Not working)
+        // let map = map.get("HTEAPOT").unwrap_or(&TOMLSchema::new());
+
+
         Config {
             port: map.get2("port").unwrap_or(8080),
             host: map.get2("host").unwrap_or("".to_string()),
