@@ -148,7 +148,7 @@ cargo clippy --all-targets --all-features
 # Run tests
 cargo test
 ```
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+See [CONTRIBUTING.md](https://github.com/Az107/HTeaPot/wiki/Contributing) for more details.
 
 ##  License
 
