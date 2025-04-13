@@ -1,7 +1,12 @@
 // Written by Alberto Ruiz 2025-01-01
-// This module handles the request struct and a builder for it
-// This implementation has some issues and fixes are required for security
-// Refactor is recomended, but for now can work with the fixes
+//
+// This module defines the HTTP request structure and a streaming builder for parsing raw input.
+// While the core functionality is usable, there are known limitations:
+// - No support for chunked transfer encoding
+// - Partial header validation
+// - No URI normalization or encoding
+//
+// ⚠️ A full refactor is recommended before production use.
 
 use super::HttpMethod;
 use std::{cmp::min, collections::HashMap, net::TcpStream, str};
@@ -9,6 +14,9 @@ use std::{cmp::min, collections::HashMap, net::TcpStream, str};
 const MAX_HEADER_SIZE: usize = 1024 * 16;
 const MAX_HEADER_COUNT: usize = 100;
 
+/// Represents a parsed HTTP request.
+///
+/// Contains method, path, optional query arguments, headers, body, and a stream (for low-level access).
 #[derive(Debug)]
 pub struct HttpRequest {
     pub method: HttpMethod,
@@ -20,6 +28,7 @@ pub struct HttpRequest {
 }
 
 impl HttpRequest {
+    /// Creates a new HTTP request with the given method and path.
     pub fn new(method: HttpMethod, path: &str) -> Self {
         return HttpRequest {
             method,
@@ -31,6 +40,7 @@ impl HttpRequest {
         };
     }
 
+    /// Returns a blank default request (empty method/path/headers).
     pub fn default() -> Self {
         HttpRequest {
             method: HttpMethod::Other(String::new()),
@@ -42,6 +52,7 @@ impl HttpRequest {
         }
     }
 
+    /// Returns a blank default request (empty method/path/headers).
     pub fn clone(&self) -> Self {
         return HttpRequest {
             method: self.method.clone(),
@@ -53,10 +64,12 @@ impl HttpRequest {
         };
     }
 
+    /// Attaches a raw TCP stream to this request.
     pub fn set_stream(&mut self, stream: TcpStream) {
         self.stream = Some(stream);
     }
 
+    /// Attempts to decode the body as UTF-8 and return it as text.
     pub fn text(&self) -> Option<String> {
         if self.body.len() == 0 {
             return None;
@@ -69,6 +82,9 @@ impl HttpRequest {
     }
 }
 
+/// Builder for incrementally parsing a raw HTTP request.
+///
+/// This is useful when reading from a stream (e.g., TCP) in chunks.
 pub struct HttpRequestBuilder {
     request: HttpRequest,
     buffer: Vec<u8>,
@@ -79,6 +95,7 @@ pub struct HttpRequestBuilder {
 }
 
 impl HttpRequestBuilder {
+    /// Creates a new builder in the initial state.
     pub fn new() -> Self {
         return HttpRequestBuilder {
             request: HttpRequest {
@@ -97,6 +114,7 @@ impl HttpRequestBuilder {
         };
     }
 
+    /// Returns the built request if parsing is complete.
     pub fn get(&self) -> Option<HttpRequest> {
         if self.done {
             return Some(self.request.clone());
@@ -105,6 +123,7 @@ impl HttpRequestBuilder {
         }
     }
 
+    /// Reads bytes into the request body based on `Content-Length`.
     fn read_body_len(&mut self) -> Option<()> {
         let body_left = self.body_size.saturating_sub(self.request.body.len());
         let to_take = min(body_left, self.buffer.len());
@@ -120,21 +139,28 @@ impl HttpRequestBuilder {
         }
     }
 
-    fn read_body_chunk(&mut self) -> Option<()> {
+    /// Placeholder for future support of chunked body parsing.
+    fn _read_body_chunk(&mut self) -> Option<()> {
         //TODO: this will support chunked body in the future
         todo!()
     }
 
+    /// Main entry point for reading the request body.
     fn read_body(&mut self) -> Option<()> {
         return self.read_body_len();
     }
 
+    /// Feeds a chunk of bytes into the builder.
+    ///
+    /// This function may return an error if the header is too large or malformed.
     pub fn append(&mut self, chunk: Vec<u8>) -> Result<(), &'static str> {
         if !self.header_done && self.buffer.len() > MAX_HEADER_SIZE {
             return Err("Entity Too large");
         }
+
         let chunk_size = chunk.len();
         self.buffer.extend(chunk);
+
         if self.header_done {
             self.read_body();
             return Ok(());
@@ -144,9 +170,10 @@ impl HttpRequestBuilder {
                 return Err("Entity Too large");
             }
         }
+
         while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
             let line = self.buffer.drain(..pos).collect::<Vec<u8>>();
-            self.buffer.drain(..2);
+            self.buffer.drain(..2); // remove CRLF
 
             let line_str = match str::from_utf8(line.as_slice()) {
                 Ok(v) => v.to_string(),
@@ -154,6 +181,7 @@ impl HttpRequestBuilder {
             };
 
             if self.request.path.is_empty() {
+                // This is the request line
                 let parts: Vec<&str> = line_str.split_whitespace().collect();
                 if parts.len() < 2 {
                     return Ok(());
@@ -162,6 +190,7 @@ impl HttpRequestBuilder {
                 if parts.len() != 3 {
                     return Err("Invalid method + path + version request");
                 }
+
                 self.request.method = HttpMethod::from_str(parts[0]);
                 let path_parts: Vec<&str> = parts[1].split('?').collect();
                 self.request.path = path_parts[0].to_string();
@@ -180,14 +209,17 @@ impl HttpRequestBuilder {
                         .collect();
                 }
             } else if !line_str.is_empty() {
+                // Header line
                 if let Some((key, value)) = line_str.split_once(":") {
                     //Check the number of headers, if the actual headers exceed that number
                     //drop the connection
                     if self.request.headers.len() > MAX_HEADER_COUNT {
                         return Err("Header number exceed allowed");
                     }
+
                     let key = key.trim().to_lowercase();
                     let value = value.trim();
+
                     if key == "content-length" {
                         if self.request.headers.get("content-length").is_some()
                             || self
@@ -206,6 +238,7 @@ impl HttpRequestBuilder {
                         .insert(key.to_string(), value.to_string());
                 }
             } else {
+                // Empty line = end of headers
                 self.header_done = true;
                 self.read_body();
                 return Ok(());
@@ -217,4 +250,6 @@ impl HttpRequestBuilder {
 
 #[cfg(test)]
 #[test]
-fn basic_request() {}
+fn basic_request() {
+    // Placeholder test — add real body/header parsing test here.
+}
