@@ -120,7 +120,7 @@ impl HttpRequestBuilder {
         }
     }
 
-    fn read_body_chunk(&mut self) -> Option<()> {
+    fn _read_body_chunk(&mut self) -> Option<()> {
         //TODO: this will support chunked body in the future
         todo!()
     }
