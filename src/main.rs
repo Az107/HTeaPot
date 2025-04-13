@@ -275,8 +275,6 @@ fn main() {
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
 
-        let is_proxy = is_proxy(&config, req.clone());
-
         // Check if the request should be proxied (either because proxy-only mode is on, or it matches a rule)
         let is_proxy = is_proxy(&config, req.clone());
         if proxy_only || is_proxy.is_some() {
