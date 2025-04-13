@@ -25,7 +25,7 @@ mod status;          // Status code mapping
 
 // Internal types used for connection management
 use self::response::{EmptyHttpResponse, HttpResponseCommon, IterError};
-use std::sync::atomic::{AtomicBool, Ordering};
+// use std::sync::atomic::{AtomicBool, Ordering};
 
 // Public API exposed by this module
 pub use self::methods::HttpMethod;
