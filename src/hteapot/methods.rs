@@ -1,3 +1,7 @@
+/// Represents an HTTP method (verb).
+///
+/// Includes standard HTTP/1.1 methods such as `GET`, `POST`, `PUT`, etc.,
+/// and a catch-all variant `Other(String)` for unknown or non-standard methods.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum HttpMethod {
     GET,
@@ -12,6 +16,21 @@ pub enum HttpMethod {
     Other(String),
 }
 impl HttpMethod {
+    /// Creates an `HttpMethod` from a raw string (case-sensitive).
+    ///
+    /// If the method is not one of the standard HTTP methods,
+    /// it will be returned as `HttpMethod::Other(method.to_string())`.
+    ///
+    /// # Examples
+    /// ```
+    /// use your_crate::HttpMethod;
+    ///
+    /// let m = HttpMethod::from_str("GET");
+    /// assert_eq!(m, HttpMethod::GET);
+    ///
+    /// let custom = HttpMethod::from_str("CUSTOM");
+    /// assert_eq!(custom, HttpMethod::Other("CUSTOM".into()));
+    /// ```
     pub fn from_str(method: &str) -> HttpMethod {
         match method {
             "GET" => HttpMethod::GET,
@@ -26,6 +45,16 @@ impl HttpMethod {
             _ => Self::Other(method.to_string()),
         }
     }
+
+    /// Returns the string representation of the HTTP method.
+    ///
+    /// If the method is non-standard (`Other`), it returns the inner string as-is.
+    ///
+    /// # Examples
+    /// ```
+    /// let method = HttpMethod::GET;
+    /// assert_eq!(method.to_str(), "GET");
+    /// ```
     pub fn to_str(&self) -> &str {
         match self {
             HttpMethod::GET => "GET",
