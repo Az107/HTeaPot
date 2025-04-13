@@ -23,7 +23,7 @@ impl HttpMethod {
     ///
     /// # Examples
     /// ```
-    /// use your_crate::HttpMethod;
+    /// use hteapot::HttpMethod;
     ///
     /// let m = HttpMethod::from_str("GET");
     /// assert_eq!(m, HttpMethod::GET);
@@ -52,6 +52,8 @@ impl HttpMethod {
     ///
     /// # Examples
     /// ```
+    /// use hteapot::HttpMethod;
+    ///
     /// let method = HttpMethod::GET;
     /// assert_eq!(method.to_str(), "GET");
     /// ```

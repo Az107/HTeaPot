@@ -54,6 +54,7 @@ const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 ///
 /// # Example
 /// ```rust
+/// use hteapot::headers;
 /// let headers = headers! {
 ///     "Content-Type" => "text/html",
 ///     "X-Custom" => "value"
