@@ -17,7 +17,19 @@
 
 A high-performance, lightweight HTTP server and library built in Rust. HTeaPot is designed to deliver exceptional performance for modern web applications while maintaining a simple and intuitive API.
 
-##  Features
+## 📚 Table of Contents
+
+- [Features](#--features)
+- [Getting Started](#-getting-started)
+  - [Standalone Server](#standalone-server)
+  - [As a Library](#as-a-library)
+- [Performance](#-performance)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
+
+## ✨ Features
 
 ###  Exceptional Performance
 - **Threaded Architecture**: Powered by a custom-designed thread system that handles **70,000+ requests per second**
@@ -34,9 +46,9 @@ A high-performance, lightweight HTTP server and library built in Rust. HTeaPot i
 - **Extensible Design**: Easily customize behavior for specific use cases
 - **Lightweight Footprint**: Zero dependencies and efficient resource usage
 
-## Getting Started
+## 🚀 Getting Started
 
-### Installation
+### 🔧 Installation
 
 ```bash
 # Install from crates.io
@@ -48,11 +60,11 @@ cd hteapot
 cargo build --release
 ```
 
-### Standalone Server
+### 🖥️ Running the Server
 
-#### Using a configuration file:
+#### Option 1: With Config
 
-Create a `config.toml` file:
+1. Create a `config.toml` file:
 
 ```toml
 [HTEAPOT]
@@ -61,27 +73,27 @@ host = "localhost" # The host address to bind to
 root = "public"    # The root directory to serve files from
 ```
 
-Run the server:
+2. Run the server:
 
 ```bash
 hteapot ./config.toml
 ```
 
-#### Quick serve a directory:
+#### Option 2: Quick Serve
 
 ```bash
 hteapot -s ./public/
 ```
 
-### As a Library
+### 🦀 Using as a Library
 
-1. Add HTeaPot to your project:
+1. Add HTeaPot to your ```Cargo.toml``` project:
 
 ```bash
 cargo add hteapot
 ```
 
-2. Implement in your code:
+2. Implement in your code: ```example```
 
 ```rust
 use hteapot::{HttpStatus, HttpResponse, Hteapot, HttpRequest};
@@ -97,16 +109,18 @@ fn main() {
 }
 ```
 
-##  Performance
+## 📊 Performance
 
 HTeaPot has been benchmarked against other popular HTTP servers, consistently demonstrating excellent metrics:
 
-| Metric        | HTeaPot | Industry Average |
-|---------------|---------|------------------|
-| Requests/sec  | 70,000+ | 30,000-50,000    |
-| Error rate    | <0.1%   | 0.5-2%           |
-| Latency (p99) | 5ms     | 15-30ms          |
-| Memory usage  | Low     | Moderate         |
+```markdown
+| Metric        | HTeaPot       | Industry Average       |
+|---------------|---------------|------------------------|
+| Requests/sec  | 70,000+ req/s | 30,000 - 50,000 req/s  |
+| Error rate    | < 0.1%        | 0.5% - 2%              |
+| Latency (p99) | 5ms           | 15ms - 30ms            |
+| Memory usage  | Low           | Moderate               |
+```
 
 ##  Roadmap
 
@@ -122,7 +136,19 @@ HTeaPot has been benchmarked against other popular HTTP servers, consistently de
 
 ##  Contributing
 
-We welcome contributions from the community! See our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get involved.
+We welcome contributions from the community! To get started:
+
+```sh
+# Format the code
+cargo fmt
+
+# Lint for warnings
+cargo clippy --all-targets --all-features
+
+# Run tests
+cargo test
+```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
 
 ##  License
 
