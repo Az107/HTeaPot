@@ -158,7 +158,6 @@ impl Hteapot {
             let action_clone = arc_action.clone();
             let priority_list_clone = priority_list.clone();
             let shutdown_signal_clone = shutdown_signal.clone();
-            let shutdown_hooks_clone = shutdown_hooks.clone();
 
             thread::spawn(move || {
                 let mut streams_to_handle = Vec::new();
@@ -173,13 +172,14 @@ impl Hteapot {
                                 .expect("Error waiting on cvar");
                         }
 
-                        if let Some(signal) = &shutdown_signal_clone {
-                            if !signal.load(Ordering::SeqCst) {
-                                for hook in shutdown_hooks_clone.iter() {
-                                    hook();
+                            if let Some(signal) = &shutdown_signal_clone {
+                                if !signal.load(Ordering::SeqCst) {
+                                    break; // Exit the server loop
                                 }
-                                break; // Exit the server loop
                             }
+                            pool = cvar
+                                .wait_while(pool, |pool| pool.is_empty())
+                                .expect("Error waiting on cvar");
                         }
 
                         while let Some(stream) = pool.pop_back() {
@@ -217,6 +217,17 @@ impl Hteapot {
         }
 
         loop {
+            if let Some(signal) = &shutdown_signal {
+                if !signal.load(Ordering::SeqCst) {
+                    let (lock, cvar) = &*pool;
+                    let _guard = lock.lock().unwrap();
+                    cvar.notify_all();
+                    for hook in shutdown_hooks.iter() {
+                        hook();
+                    }
+                    break;
+                }
+            }
             let stream = match listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(_) => continue,
