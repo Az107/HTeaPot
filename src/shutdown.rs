@@ -1,134 +1,78 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
+use std::{ptr, thread};
 
 use crate::hteapot::Hteapot;
 use crate::logger::Logger;
 
 pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<AtomicBool> {
     let running = Arc::new(AtomicBool::new(true));
-    let r_server = running.clone();
     let shutdown_logger = logger.with_component("shutdown");
-    
+
     #[cfg(unix)]
     {
-        let r_unix = running.clone();
-        let unix_logger = shutdown_logger.clone();
-        unix_signal::register_signal_handler(r_unix, unix_logger);
+        static mut RUNNING_PTR: *const AtomicBool = ptr::null();
+        static COUNTER_PTR: AtomicUsize = AtomicUsize::new(0);
+
+        extern "C" fn handle_sigint(_: i32) {
+            unsafe {
+                if COUNTER_PTR.load(Ordering::SeqCst) < 9 {
+                    COUNTER_PTR.fetch_add(1, Ordering::SeqCst);
+                    if COUNTER_PTR.load(Ordering::SeqCst) == 9 {
+                        println!("\rPress ctrl+c one more time to force quit");
+                    }
+                } else {
+                    println!("\rForcing exit, now!");
+                    std::process::exit(0);
+                }
+
+                if !RUNNING_PTR.is_null() {
+                    (*RUNNING_PTR).store(false, Ordering::SeqCst);
+                }
+            }
+        }
+
+        unsafe {
+            RUNNING_PTR = Arc::as_ptr(&running);
+            libc::signal(libc::SIGINT, handle_sigint as usize);
+        }
     }
-    
+
     #[cfg(windows)]
     {
         let r_win = running.clone();
         let win_logger = shutdown_logger.clone();
-        
+
         if !win_console::set_handler(r_win, win_logger.clone()) {
             win_logger.error("Failed to set Windows Ctrl+C handler".to_string());
         } else {
             win_logger.info("Windows Ctrl+C handler registered".to_string());
         }
     }
-    
-    let r_enter = running.clone();
-    let enter_logger = shutdown_logger.clone();
-    
-    thread::spawn(move || {
-        println!(" Ctrl+C to shutdown the server gracefully...");
-        let mut buffer = String::new();
-        let _ = std::io::stdin().read_line(&mut buffer);
-        enter_logger.info("Enter pressed, initiating graceful shutdown...".to_string());
-        r_enter.store(false, Ordering::SeqCst);
-    });
-    
-    // Set up server with shutdown signal
-    server.set_shutdown_signal(r_server);
-    
+
     // Add shutdown hook for cleanup
     let shutdown_logger_clone = shutdown_logger.clone();
     server.add_shutdown_hook(move || {
         shutdown_logger_clone.info("Waiting for ongoing requests to complete...".to_string());
-        
+
         thread::sleep(Duration::from_secs(3));
-        
+
         shutdown_logger_clone.info("Server shutdown complete.".to_string());
-        
+
         std::process::exit(0);
     });
-    
+
+    server.set_shutdown_signal(running.clone());
     // Return the running flag so the main thread can also check it
     running
 }
 
-#[cfg(unix)]
-pub mod unix_signal {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-    use std::ptr;
-    use std::mem;
-    
-    use libc::{c_int, sigaction, sighandler_t, sigset_t};
-    use libc::{SA_RESTART, SIGINT};
-    
-    use crate::logger::Logger;
-    
-    // Thread-safe flag to indicate signal received
-    static mut SIGNAL_RECEIVED: bool = false;
-    
-    // Signal handler function - minimal to avoid UB
-    extern "C" fn handle_signal(_: c_int) {
-        unsafe {
-            SIGNAL_RECEIVED = true;
-        }
-    }
-    
-    pub fn register_signal_handler(running: Arc<AtomicBool>, logger: Logger) {
-        unsafe {
-            // Set up the sigaction struct
-            let mut sigact: sigaction = mem::zeroed();
-            sigact.sa_sigaction = handle_signal as sighandler_t;
-            sigact.sa_flags = SA_RESTART;
-            
-            // Empty the signal mask
-            sigemptyset(&mut sigact.sa_mask);
-            
-            // Register our signal handler for SIGINT
-            if sigaction(SIGINT, &sigact, ptr::null_mut()) < 0 {
-                logger.error("Failed to set SIGINT handler".to_string());
-                return;
-            } else {
-                logger.info("SIGINT handler registered".to_string());
-            }
-        }
-        
-        // Start a monitoring thread that periodically checks the signal flag
-        // and updates the running atomic
-        let monitor_logger = logger.clone();
-        std::thread::spawn(move || {
-            while running.load(Ordering::SeqCst) {
-                unsafe {
-                    if SIGNAL_RECEIVED {
-                        monitor_logger.info("SIGINT received, initiating graceful shutdown...".to_string());
-                        running.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        });
-    }
-    
-    // Helper function to create an empty signal set
-    unsafe fn sigemptyset(set: *mut sigset_t) {
-        ptr::write_bytes(set, 0, 1);
-    }
-}
-
 #[cfg(windows)]
 pub mod win_console {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     // Define the external Windows API function in an unsafe extern block
     unsafe extern "system" {

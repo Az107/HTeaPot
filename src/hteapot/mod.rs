@@ -166,7 +166,6 @@ impl Hteapot {
                     {
                         let (lock, cvar) = &*pool_clone;
                         let mut pool = lock.lock().expect("Error locking pool");
-
                         if streams_to_handle.is_empty() {
                             // Store the returned guard back into pool
                             pool = cvar
