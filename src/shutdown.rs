@@ -96,7 +96,8 @@ pub mod unix_signal {
             
             // Set up the sigaction struct
             let mut sigact: sigaction = mem::zeroed();
-            sigact.sa_handler = handle_signal as sighandler_t;
+            // Fix: Use the correct field name for the handler
+            sigact.sa_sigaction = handle_signal as sighandler_t;
             sigact.sa_flags = SA_RESTART;
             
             // Empty the signal mask
@@ -113,7 +114,10 @@ pub mod unix_signal {
     
     // Helper function to create an empty signal set
     unsafe fn sigemptyset(set: *mut sigset_t) {
-        ptr::write_bytes(set, 0, 1);
+        // Fix: Add unsafe block around the unsafe operation
+        unsafe {
+            ptr::write_bytes(set, 0, 1);
+        }
     }
 }
 
