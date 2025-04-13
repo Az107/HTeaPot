@@ -113,14 +113,12 @@ fn main() {
 
 HTeaPot has been benchmarked against other popular HTTP servers, consistently demonstrating excellent metrics:
 
-```markdown
 | Metric        | HTeaPot       | Industry Average       |
 |---------------|---------------|------------------------|
 | Requests/sec  | 70,000+ req/s | 30,000 - 50,000 req/s  |
 | Error rate    | < 0.1%        | 0.5% - 2%              |
 | Latency (p99) | 5ms           | 15ms - 30ms            |
 | Memory usage  | Low           | Moderate               |
-```
 
 ##  Roadmap
 
