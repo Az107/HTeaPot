@@ -79,8 +79,8 @@ pub mod unix_signal {
     // Signal handler function
     extern "C" fn handle_signal(_: c_int) {
         unsafe {
-            if let Some(running) = &RUNNING {
-                if let Some(logger) = &LOGGER {
+            if let Some(running) = &raw const  &RUNNING {
+                if let Some(logger) = &raw const  &LOGGER {
                     logger.info("SIGINT received, initiating graceful shutdown...".to_string());
                 }
                 running.store(false, Ordering::SeqCst);
