@@ -1,15 +1,23 @@
+use std::mem::zeroed;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{ptr, thread};
 
+use libc::{SA_RESTART, sigaction, sighandler_t};
+
 use crate::hteapot::Hteapot;
 use crate::logger::Logger;
 
 pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<AtomicBool> {
+    let existing_signal = server.get_shutdown_signal();
+    if existing_signal.is_some() {
+        return existing_signal.unwrap();
+    }
     let running = Arc::new(AtomicBool::new(true));
     let shutdown_logger = logger.with_component("shutdown");
 
+    //This is a simplification an a ad-hoc solution
     #[cfg(unix)]
     {
         static mut RUNNING_PTR: *const AtomicBool = ptr::null();
@@ -34,8 +42,15 @@ pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<Atom
         }
 
         unsafe {
+            // Create a raw pointer and increase the reference counter to avoid
+            // UB and early deallocation. IMPORTANT: remember to decrement if in the
+            // future there is a function to disable this ctrl+c logic
             RUNNING_PTR = Arc::as_ptr(&running);
-            libc::signal(libc::SIGINT, handle_sigint as usize);
+            Arc::increment_strong_count(RUNNING_PTR);
+            let mut action: sigaction = zeroed();
+            action.sa_flags = SA_RESTART;
+            action.sa_sigaction = handle_sigint as sighandler_t;
+            sigaction(libc::SIGINT, &action, std::ptr::null_mut());
         }
     }
 
@@ -60,7 +75,7 @@ pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<Atom
 
         shutdown_logger_clone.info("Server shutdown complete.".to_string());
 
-        std::process::exit(0);
+        //std::process::exit(0);
     });
 
     server.set_shutdown_signal(running.clone());

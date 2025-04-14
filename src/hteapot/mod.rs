@@ -101,6 +101,10 @@ impl Hteapot {
         self.shutdown_signal = Some(signal);
     }
 
+    pub fn get_shutdown_signal(&self) -> Option<Arc<AtomicBool>> {
+        self.shutdown_signal.clone()
+    }
+
     pub fn add_shutdown_hook<F>(&mut self, hook: F)
     where
         F: Fn() + Send + Sync + 'static,
