@@ -112,6 +112,12 @@ impl Hteapot {
         self.shutdown_hooks.push(Arc::new(hook));
     }
 
+    pub fn get_addr(&self) -> (String, u16) {
+        //TODO: write logic to resolve adress to a correct ip
+        //example: "localhost" -> "0.0.0.0" or "127.0.0.1"
+        return (self.address.clone(), self.port);
+    }
+
     // Constructor
     pub fn new(address: &str, port: u16) -> Self {
         Hteapot {
@@ -175,15 +181,11 @@ impl Hteapot {
                                 .wait_while(pool, |pool| pool.is_empty())
                                 .expect("Error waiting on cvar");
                         }
-
-                            if let Some(signal) = &shutdown_signal_clone {
-                                if !signal.load(Ordering::SeqCst) {
-                                    break; // Exit the server loop
-                                }
+                        //TODO: move this to allow process the last request
+                        if let Some(signal) = &shutdown_signal_clone {
+                            if !signal.load(Ordering::SeqCst) {
+                                break; // Exit the server loop
                             }
-                            pool = cvar
-                                .wait_while(pool, |pool| pool.is_empty())
-                                .expect("Error waiting on cvar");
                         }
 
                         while let Some(stream) = pool.pop_back() {

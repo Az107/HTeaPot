@@ -1,10 +1,15 @@
+use core::panic;
 use std::mem::zeroed;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{ptr, thread};
 
-use libc::{SA_RESTART, sigaction, sighandler_t};
+use libc::{
+    AF_INET, SA_RESTART, SOCK_STREAM, close, connect, htons, in_addr, sigaction, sighandler_t,
+    sockaddr, sockaddr_in, socket,
+};
 
 use crate::hteapot::Hteapot;
 use crate::logger::Logger;
@@ -20,6 +25,34 @@ pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<Atom
     //This is a simplification an a ad-hoc solution
     #[cfg(unix)]
     {
+        fn to_sockaddr_in(addr: (String, i16)) -> sockaddr_in {
+            let ip: Ipv4Addr = addr.0.parse().expect("IP inválida");
+            let port = addr.1 as u16;
+
+            sockaddr_in {
+                sin_family: libc::AF_INET as u8,
+                #[cfg(any(
+                    target_os = "macos",
+                    target_os = "ios",
+                    target_os = "freebsd",
+                    target_os = "netbsd",
+                    target_os = "openbsd"
+                ))]
+                sin_len: std::mem::size_of::<sockaddr_in>() as u8,
+                sin_port: htons(port),
+                sin_addr: in_addr {
+                    s_addr: u32::from_ne_bytes(ip.octets()),
+                },
+                sin_zero: [0; 8],
+            }
+        }
+        unsafe {
+            // safety guard to avoid editions of RUNNING_PTR
+            // this will change whit multi server support
+            if !RUNNING_PTR.is_null() {
+                panic!("Tried to setup shutdown for two different server instances");
+            }
+        }
         static mut RUNNING_PTR: *const AtomicBool = ptr::null();
         static COUNTER_PTR: AtomicUsize = AtomicUsize::new(0);
 
@@ -37,16 +70,30 @@ pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<Atom
 
                 if !RUNNING_PTR.is_null() {
                     (*RUNNING_PTR).store(false, Ordering::SeqCst);
+                    let fd = socket(AF_INET, SOCK_STREAM, 0);
+                    let addr = to_sockaddr_in(("0.0.0.0".to_string(), 8081));
+                    let _ = connect(
+                        fd,
+                        &addr as *const sockaddr_in as *const sockaddr,
+                        size_of::<sockaddr_in>() as u32,
+                    );
+
+                    // cerramos el socket aunque haya fallado
+                    close(fd);
                 }
             }
         }
 
         unsafe {
+            ///////////////////////////////////////////////////////////////////////////
             // Create a raw pointer and increase the reference counter to avoid
             // UB and early deallocation. IMPORTANT: remember to decrement if in the
             // future there is a function to disable this ctrl+c logic
+            ///////////////////////////////////////////////////////////////////////////
+
             RUNNING_PTR = Arc::as_ptr(&running);
             Arc::increment_strong_count(RUNNING_PTR);
+
             let mut action: sigaction = zeroed();
             action.sa_flags = SA_RESTART;
             action.sa_sigaction = handle_sigint as sighandler_t;
@@ -70,12 +117,8 @@ pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<Atom
     let shutdown_logger_clone = shutdown_logger.clone();
     server.add_shutdown_hook(move || {
         shutdown_logger_clone.info("Waiting for ongoing requests to complete...".to_string());
-
         thread::sleep(Duration::from_secs(3));
-
-        shutdown_logger_clone.info("Server shutdown complete.".to_string());
-
-        //std::process::exit(0);
+        shutdown_logger_clone.info("Exiting".to_string());
     });
 
     server.set_shutdown_signal(running.clone());
