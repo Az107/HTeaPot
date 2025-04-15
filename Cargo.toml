@@ -24,6 +24,9 @@ path = "src/hteapot/mod.rs"
 [[bin]]
 name = "hteapot"
 
+[dependencies]
+libc = "0.2.172"
+
 
 [package.metadata.docs.rs]
 no-readme = true

@@ -38,12 +38,8 @@ mod cache;
 mod config;
 pub mod hteapot;
 mod logger;
+mod shutdown;
 mod utils;
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-use std::time::Duration;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -246,7 +242,10 @@ fn main() {
     let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64)); // Initialize the cache with TTL
 
     // Create a new threaded HTTP server with the provided host, port, and number of threads
-    let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+    let mut server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+
+    //Configure graceful shutdown from ctrl+c
+    shutdown::setup_graceful_shutdown(&mut server, logger.clone());
 
     logger.info(format!(
         "Server started at http://{}:{}",

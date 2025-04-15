@@ -37,6 +37,7 @@ pub use self::status::HttpStatus;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -113,8 +114,6 @@ impl Hteapot {
     }
 
     pub fn get_addr(&self) -> (String, u16) {
-        //TODO: write logic to resolve adress to a correct ip
-        //example: "localhost" -> "0.0.0.0" or "127.0.0.1"
         return (self.address.clone(), self.port);
     }
 
