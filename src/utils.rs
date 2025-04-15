@@ -1,12 +1,35 @@
 use std::path::Path;
 
+/// Returns the MIME type based on the file extension of a given path.
+///
+/// This function maps common file extensions to their appropriate
+/// `Content-Type` values for HTTP responses.
+///
+/// If the extension is unrecognized or missing, it defaults to
+/// `"application/octet-stream"` for safe binary delivery.
+///
+/// # Arguments
+///
+/// * `path` - A file path as a `String` from which to extract the extension.
+///
+/// # Examples
+///
+/// ```
+/// let mime = get_mime_tipe(&"file.html".to_string());
+/// assert_eq!(mime, "text/html; charset=utf-8");
+/// ```
 pub fn get_mime_tipe(path: &String) -> String {
     let extension = Path::new(path.as_str())
         .extension()
         .map(|ext| ext.to_str().unwrap_or(""))
         .unwrap_or("");
+
+    // Suggest using `to_str()` directly on the extension
+    // Alternative way to get the extension
+    // .and_then(|ext| ext.to_str())
         
     let mimetipe = match extension {
+        // Text
         "html" | "htm" => "text/html; charset=utf-8",
         "js" => "text/javascript",
         "mjs" => "text/javascript",

@@ -1,5 +1,8 @@
 // Written by Alberto Ruiz 2024-04-08
-// This is the HTTP client module, it will handle the requests and responses
+// 
+// This module provides basic HTTP client functionality. It defines
+// methods to compose and send HTTP requests and parse the resulting
+// responses using a `TcpStream`.
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -11,71 +14,85 @@ use super::response::HttpResponse;
 // use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 impl HttpRequest {
+    /// Adds a query argument to the HTTP request.
     pub fn arg(&mut self, key: &str, value: &str) -> &mut HttpRequest {
         self.args.insert(key.to_string(), value.to_string());
-        return self;
+        self
     }
 
+    /// Adds a header to the HTTP request.
     pub fn header(&mut self, key: &str, value: &str) -> &mut HttpRequest {
         self.headers.insert(key.to_string(), value.to_string());
-        return self;
+        self
     }
 
+    /// Converts the request into a raw HTTP/1.1-compliant string.
+    ///
+    /// This includes method, path with optional query args, headers, and optional body.
     pub fn to_string(&self) -> String {
+        // Add query parameters to the path if needed
         let path = if self.args.is_empty() {
             self.path.clone()
         } else {
-            let mut path = self.path.clone();
-            path.push('?');
-            for (k, v) in self.args.iter() {
-                path.push_str(format!("{}={}&", k, v).as_str());
+            let mut path = format!("{}?", self.path);
+            for (k, v) in &self.args {
+                path.push_str(&format!("{}={}&", k, v));
             }
             if path.ends_with('&') {
                 path.pop();
             }
             path
         };
-        let path = if path.is_empty() {
-            "/".to_string()
-        } else {
-            path
-        };
-        let mut result: String = format!("{} {} HTTP/1.1\r\n", self.method.to_str(), path);
-        for (k, v) in self.headers.iter() {
-            result.push_str(format!("{}: {}\r\n", k, v).as_str());
+
+        let path = if path.is_empty() { "/".to_string() } else { path };
+
+        let mut result = format!("{} {} HTTP/1.1\r\n", self.method.to_str(), path);
+        for (k, v) in &self.headers {
+            result.push_str(&format!("{}: {}\r\n", k, v));
         }
 
-        result.push_str(self.text().unwrap_or(String::new()).as_str());
-
+        result.push_str(&self.text().unwrap_or_default());
         result.push_str("\r\n\r\n");
+
         result
     }
 
+    /// Sends the request to a remote server and returns a parsed response.
+    ///
+    /// Supports only `http://` (not `https://`). Attempts to resolve the domain
+    /// and open a TCP connection. Times out after 5 seconds.
     pub fn brew(&self, addr: &str) -> Result<Box<HttpResponse>, &'static str> {
         let mut addr = addr.to_string();
-        if addr.starts_with("http://") {
-            addr = addr.strip_prefix("http://").unwrap().to_string();
+
+        // Strip protocol prefix
+        if let Some(stripped) = addr.strip_prefix("http://") {
+            addr = stripped.to_string();
         } else if addr.starts_with("https://") {
-            return Err("Not implemented yet");
-        }
-        if !addr.contains(':') {
-            let _addr = format!("{}:80", addr.clone());
-            addr = _addr
-        }
-        let addr: Vec<_> = addr
-            .to_socket_addrs()
-            .expect("Unable to resolve domain")
-            .collect();
-        let addr = addr.first().expect("Error parsing address");
-        let stream = TcpStream::connect_timeout(addr, Duration::from_secs(5));
-        if stream.is_err() {
-            return Err("Error connecting to server");
+            return Err("HTTPS not implemented yet");
         }
 
-        let mut stream = stream.unwrap();
-        let _ = stream.write(self.to_string().as_bytes());
+        // Add port if missing
+        if !addr.contains(':') {
+            addr.push_str(":80");
+        }
+
+        // Resolve address
+        let resolved_addrs: Vec<_> = addr
+            .to_socket_addrs()
+            .map_err(|_| "Unable to resolve domain")?
+            .collect();
+
+        let socket_addr = resolved_addrs.first().ok_or("No address found")?;
+
+        // Connect to server
+        let stream = TcpStream::connect_timeout(socket_addr, Duration::from_secs(5))
+            .map_err(|_| "Error connecting to server")?;
+
+        let mut stream = stream;
+        let _ = stream.write_all(self.to_string().as_bytes());
         let _ = stream.flush();
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+
         let mut raw: Vec<u8> = Vec::new();
         let _ = stream.read_to_end(&mut raw);
 
@@ -83,8 +100,11 @@ impl HttpRequest {
     }
 }
 
+/// Alias to send a request via `request.brew()`.
+///
+/// Useful for calling as a standalone function.
 pub fn brew(direction: &str, request: &mut HttpRequest) -> Result<Box<HttpResponse>, &'static str> {
-    return request.brew(direction);
+    request.brew(direction)
 }
 
 // pub fn brew_url(url: &str) -> Result<HttpResponse, &'static str> {

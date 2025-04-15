@@ -5,8 +5,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::fmt;
 use std::sync::Arc;
 
-
-
 /// Differnt log levels
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Copy)]
 #[allow(dead_code)]
@@ -32,6 +30,7 @@ impl fmt::Display for LogLevel {
     }
 }
 
+/// A helper struct for generating formatted timestamps in `YYYY-MM-DD HH:MM:SS.sss` format.
 struct SimpleTime;
 impl SimpleTime {
     fn epoch_to_ymdhms(seconds: u64, nanos: u32) -> (i32, u32, u32, u32, u32, u32, u32) {
@@ -89,6 +88,8 @@ impl SimpleTime {
 
         (year, month as u32 + 1, day as u32, hour, minute, second, millis)
     }
+
+    /// Returns a formatted timestamp string for the current system time.
     pub fn get_current_timestamp() -> String {
         let now = SystemTime::now();
         let since_epoch = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
@@ -103,7 +104,7 @@ impl SimpleTime {
     }
 }
 
-// Log message with metadata
+/// Internal message structure containing log metadata.
 struct LogMessage {
     timestamp: String,
     level: LogLevel,
@@ -111,11 +112,16 @@ struct LogMessage {
     content: String,
 }
 
+/// Core logger implementation running in a background thread.
 struct LoggerCore {
     tx: Sender<LogMessage>,
     _thread: JoinHandle<()>,
 }
 
+/// A non-blocking, multi-threaded logger with support for log levels and components.
+///
+/// Logs are sent via a background thread to avoid blocking the main thread.
+/// The logger buffers messages and flushes them periodically or based on buffer size.
 pub struct Logger {
     core: Arc<LoggerCore>,
     component: Arc<String>,
@@ -123,6 +129,7 @@ pub struct Logger {
 }
 
 impl Logger {
+    /// Creates a new logger with the given writer, minimum log level, and component name.
     pub fn new<W: Sized + Write + Send + Sync + 'static>(
         mut writer: W,
         min_level: LogLevel,
@@ -134,6 +141,7 @@ impl Logger {
             let mut buff = Vec::new();
             let mut max_size = 100;
             let timeout = Duration::from_secs(1);
+
             loop {
                 let msg = rx.recv_timeout(timeout);
                 match msg {
@@ -148,6 +156,7 @@ impl Logger {
                     Err(_) => break,
                 }
 
+                // Flush if timeout or buffer threshold reached
                 if last_flush.elapsed() >= timeout || buff.len() >= max_size {
                     if !buff.is_empty() {
                         if buff.len() >= max_size {
@@ -178,7 +187,7 @@ impl Logger {
         }
     }
 
-    // New logger with different component but sharing same output
+    /// Creates a new logger instance with a different component name, but sharing same output.
     pub fn with_component(&self, component: &str) -> Logger {
         Logger {
             core: Arc::clone(&self.core),
@@ -187,6 +196,7 @@ impl Logger {
         }
     }
 
+    /// Sends a log message with the given level and content.
     pub fn log(&self, level: LogLevel, content: String) {
         if level < self.min_level {
             return;
@@ -198,10 +208,12 @@ impl Logger {
             component: (*self.component).clone(),
             content,
         };
+
         // Send the log message to the channel
         let _ = self.core.tx.send(log_msg);
     }
 
+    /// Logs a DEBUG-level message.
     pub fn debug(&self, content: String) {
         self.log(LogLevel::DEBUG, content);
     }
@@ -232,6 +244,17 @@ impl Logger {
         self.log(LogLevel::TRACE, content);
     }
 }
+
+impl Clone for Logger {
+    fn clone(&self) -> Self {
+        Logger {
+            core: Arc::clone(&self.core),
+            component: Arc::clone(&self.component),
+            min_level: self.min_level,
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

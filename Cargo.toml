@@ -1,16 +1,17 @@
 [package]
-edition = "2024"
 name = "hteapot"
 version = "0.5.0"
-exclude = ["config.toml", "demo/", "readme.md"]
-license = "MIT"
-keywords = ["HTTP", "HTTP-SERVER"]
+edition = "2024"
+authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 description = "HTeaPot is a lightweight HTTP server library designed to be easy to use and extend."
+license = "MIT"
+readme = "README.md"
+documentation = "https://docs.rs/hteapot/"
 homepage = "https://github.com/az107/HTeaPot"
 repository = "https://github.com/az107/HTeaPot"
-readme = "readme.md"
-categories = ["network-programming", "web-programming"]
-authors = ["Alb Ruiz G. <me@albruiz.dev>"]
+keywords = ["http", "server", "web", "lightweight", "rust"]
+categories = ["network-programming", "web-programming", "command-line-utilities"]
+exclude = ["config.toml", "demo/", "README.md"]
 
 [lib]
 name = "hteapot"
@@ -18,3 +19,6 @@ path = "src/hteapot/mod.rs"
 
 [[bin]]
 name = "hteapot"
+
+[package.metadata.docs.rs]
+no-readme = true
