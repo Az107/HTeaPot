@@ -38,18 +38,19 @@ mod cache;
 mod config;
 pub mod hteapot;
 mod logger;
+mod shutdown;
 mod utils;
 
-use std::{fs, io, path::PathBuf};
 use std::path::Path;
 use std::sync::Mutex;
+use std::{fs, io, path::PathBuf};
 
 use cache::Cache;
 use config::Config;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use utils::get_mime_tipe;
 
-use logger::{Logger, LogLevel};
+use logger::{LogLevel, Logger};
 use std::time::Instant;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -79,13 +80,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     let root_path = Path::new(root).canonicalize().ok()?;
     let requested_full_path = root_path.join(requested_path.trim_start_matches("/"));
-    
+
     if !requested_full_path.exists() {
         return None;
     }
-    
+
     let canonical_path = requested_full_path.canonicalize().ok()?;
-    
+
     if canonical_path.starts_with(&root_path) {
         Some(canonical_path)
     } else {
@@ -143,14 +144,13 @@ fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
     let r = fs::read(path);
     if r.is_ok() { Some(r.unwrap()) } else { None }
 }
-// 
+//
 // Suggest to use .ok()? instead of manual unwrap/if is_ok for more idiomatic error handling:
 // fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
-    // fs::read(path).ok()
+// fs::read(path).ok()
 // }
-// 
-// 
-
+//
+//
 
 /// Main entry point of the Hteapot server.
 ///
@@ -177,7 +177,7 @@ fn main() {
         println!("usage: {} <config file>", args[0]);
         return;
     }
-    
+
     // Initialize logger based on config or default to stdout
     let config = match args[1].as_str() {
         "--help" | "-h" => {
@@ -223,36 +223,40 @@ fn main() {
     // Initialize the logger based on the config or default to stdout if the log file can't be created
     let logger = match config.log_file.clone() {
         Some(file_name) => {
-            let file = fs::File::create(file_name.clone());  // Attempt to create the log file
-            match file {  // If creating the file fails, log to stdout instead
-                Ok(file) => Logger::new(file, LogLevel::INFO, "main"),  // If successful, use the file
+            let file = fs::File::create(file_name.clone()); // Attempt to create the log file
+            match file {
+                // If creating the file fails, log to stdout instead
+                Ok(file) => Logger::new(file, LogLevel::INFO, "main"), // If successful, use the file
                 Err(e) => {
                     println!("Failed to create log file: {:?}. Using stdout instead.", e);
-                    Logger::new(io::stdout(), LogLevel::INFO, "main")  // Log to stdout
+                    Logger::new(io::stdout(), LogLevel::INFO, "main") // Log to stdout
                 }
             }
         }
-        None => Logger::new(io::stdout(), LogLevel::INFO, "main"),   // If no log file is specified, use stdout
+        None => Logger::new(io::stdout(), LogLevel::INFO, "main"), // If no log file is specified, use stdout
     };
 
     // Set up the cache with thread-safe locking
     // The Mutex ensures that only one thread can access the cache at a time,
     // preventing race conditions when reading and writing to the cache.
-    let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64));  // Initialize the cache with TTL
+    let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64)); // Initialize the cache with TTL
 
     // Create a new threaded HTTP server with the provided host, port, and number of threads
-    let server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+    let mut server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
+
+    //Configure graceful shutdown from ctrl+c
+    shutdown::setup_graceful_shutdown(&mut server, logger.clone());
 
     logger.info(format!(
         "Server started at http://{}:{}",
         config.host, config.port
-    ));  // Log that the server has started
+    )); // Log that the server has started
 
     // Log whether the cache is enabled based on the config setting
     if config.cache {
         logger.info("Cache Enabled".to_string());
     }
-    
+
     // If proxy-only mode is enabled, issue a warning that local paths won't be used
     if proxy_only {
         logger
@@ -268,9 +272,9 @@ fn main() {
     // Start listening for HTTP requests
     server.listen(move |req| {
         // SERVER CORE: For each incoming request, we handle it in this closure
-        let start_time = Instant::now();  // Track request processing time
-        let req_method = req.method.to_str();  // Get the HTTP method (e.g., GET, POST)
-        let req_path = req.path.clone();  // Get the requested path
+        let start_time = Instant::now(); // Track request processing time
+        let req_method = req.method.to_str(); // Get the HTTP method (e.g., GET, POST)
+        let req_path = req.path.clone(); // Get the requested path
 
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
@@ -279,22 +283,21 @@ fn main() {
         let is_proxy = is_proxy(&config, req.clone());
         if proxy_only || is_proxy.is_some() {
             // If proxying is enabled or this request matches a proxy rule, handle it
-            let (host, proxy_req) = is_proxy.unwrap();  // Get the target host and modified request
+            let (host, proxy_req) = is_proxy.unwrap(); // Get the target host and modified request
             proxy_logger.info(format!(
                 "Proxying request {} {} to {}",
                 req_method, req_path, host
             ));
 
-
             // Perform the proxy request (forward the request to the target server)
             let res = proxy_req.brew(host.as_str());
-            let elapsed = start_time.elapsed();  // Measure the time taken to process the proxy request
+            let elapsed = start_time.elapsed(); // Measure the time taken to process the proxy request
             if res.is_ok() {
                 // If the proxy request is successful, log the time taken and return the response
                 let response = res.unwrap();
                 proxy_logger.info(format!(
                     "Proxy request processed in {:.6}ms",
-                    elapsed.as_secs_f64() * 1000.0  // Log the time taken in milliseconds
+                    elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
                 ));
                 return response;
             } else {
@@ -316,12 +319,12 @@ fn main() {
                 // If the root path exists and is valid, try to join the index file
                 let index_path = root_path.unwrap().join(&config.index);
                 if index_path.exists() {
-                    Some(index_path)  // If index exists, return its path
+                    Some(index_path) // If index exists, return its path
                 } else {
-                    None  // If no index exists, return None
+                    None // If no index exists, return None
                 }
             } else {
-                None  // If the root path is invalid, return None
+                None // If the root path is invalid, return None
             }
         } else {
             // For any other path, resolve it safely using the `safe_join_paths` function
@@ -335,16 +338,17 @@ fn main() {
                     // If it's a directory, check for the index file in that directory
                     let index_path = path.join(&config.index);
                     if index_path.exists() {
-                        index_path  // If index exists, return its path
+                        index_path // If index exists, return its path
                     } else {
                         // If no index file exists, log a warning and return a 404 response
-                        http_logger.warn(format!("Index file not found in directory: {}", req.path));
+                        http_logger
+                            .warn(format!("Index file not found in directory: {}", req.path));
                         return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
                     }
                 } else {
-                    path  // If it's not a directory, just return the path
+                    path // If it's not a directory, just return the path
                 }
-            },
+            }
             None => {
                 // If the path is invalid or access is denied, return a 404 response
                 http_logger.warn(format!("Path not found or access denied: {}", req.path));
@@ -359,9 +363,9 @@ fn main() {
         let content: Option<Vec<u8>> = if config.cache {
             // Lock the cache to ensure thread-safe access
             let mut cachee = cache.lock().expect("Error locking cache");
-            let cache_start = Instant::now();  // Track cache operation time
-            let cache_key = req.path.clone();  // Use the request path as the cache key
-            let mut r = cachee.get(cache_key.clone());  // Try to get the content from cache
+            let cache_start = Instant::now(); // Track cache operation time
+            let cache_key = req.path.clone(); // Use the request path as the cache key
+            let mut r = cachee.get(cache_key.clone()); // Try to get the content from cache
             if r.is_none() {
                 // If cache miss, read the file from disk and store it in cache
                 cache_logger.debug(format!("cache miss for {}", cache_key));
@@ -379,10 +383,10 @@ fn main() {
             // Log how long the cache operation took
             let cache_elapsed = cache_start.elapsed();
             cache_logger.debug(format!(
-                "Cache operation completed in {:.6}µs", 
+                "Cache operation completed in {:.6}µs",
                 cache_elapsed.as_micros()
             ));
-            r  // Return the cached content (or None if not found)
+            r // Return the cached content (or None if not found)
         } else {
             // If cache is disabled, read the file from disk
             serve_file(&safe_path)
@@ -392,7 +396,7 @@ fn main() {
         let elapsed = start_time.elapsed();
         http_logger.info(format!(
             "Request processed in {:.6}ms",
-            elapsed.as_secs_f64() * 1000.0  // Log the time taken in milliseconds
+            elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
         ));
 
         // If content was found, return it with the appropriate headers, otherwise return a 404
@@ -404,11 +408,11 @@ fn main() {
                     "X-Content-Type-Options" => "nosniff"
                 );
                 HttpResponse::new(HttpStatus::OK, c, headers)
-            },
+            }
             None => {
                 // If no content is found, return a 404 Not Found response
                 HttpResponse::new(HttpStatus::NotFound, "Not found", None)
-            },
+            }
         }
     });
 }

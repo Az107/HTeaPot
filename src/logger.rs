@@ -1,9 +1,9 @@
+use std::fmt;
 use std::io::Write;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::Arc;
+use std::sync::mpsc::{Sender, channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::fmt;
-use std::sync::Arc;
 
 /// Differnt log levels
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Copy)]
@@ -86,7 +86,15 @@ impl SimpleTime {
         // calculate millisecs from nanosecs
         let millis = nanos / 1_000_000;
 
-        (year, month as u32 + 1, day as u32, hour, minute, second, millis)
+        (
+            year,
+            month as u32 + 1,
+            day as u32,
+            hour,
+            minute,
+            second,
+            millis,
+        )
     }
 
     /// Returns a formatted timestamp string for the current system time.
@@ -133,7 +141,7 @@ impl Logger {
     pub fn new<W: Sized + Write + Send + Sync + 'static>(
         mut writer: W,
         min_level: LogLevel,
-        component: &str
+        component: &str,
     ) -> Logger {
         let (tx, rx) = channel::<LogMessage>();
         let thread = thread::spawn(move || {
@@ -151,7 +159,7 @@ impl Logger {
                             msg.timestamp, msg.level, msg.component, msg.content
                         );
                         buff.push(formatted);
-                    },
+                    }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }
@@ -238,8 +246,8 @@ impl Logger {
     pub fn fatal(&self, content: String) {
         self.log(LogLevel::FATAL, content);
     }
-    /// Log a message with TRACE level 
-    #[allow(dead_code)] 
+    /// Log a message with TRACE level
+    #[allow(dead_code)]
     pub fn trace(&self, content: String) {
         self.log(LogLevel::TRACE, content);
     }
@@ -255,18 +263,17 @@ impl Clone for Logger {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::stdout;
-    
+
     #[test]
     fn test_basic() {
         let logs = Logger::new(stdout(), LogLevel::DEBUG, "test");
         logs.info("test message".to_string());
         logs.debug("debug info".to_string());
-        
+
         // Create a sub-logger with a different component
         let sub_logger = logs.with_component("sub-component");
         sub_logger.warn("warning from sub-component".to_string());

@@ -190,7 +190,6 @@ impl HttpRequestBuilder {
                 if parts.len() != 3 {
                     return Err("Invalid method + path + version request");
                 }
-
                 self.request.method = HttpMethod::from_str(parts[0]);
                 let path_parts: Vec<&str> = parts[1].split('?').collect();
                 self.request.path = path_parts[0].to_string();
