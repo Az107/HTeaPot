@@ -21,7 +21,6 @@ pub fn setup_graceful_shutdown(server: &mut Hteapot, logger: Logger) -> Arc<Atom
         let running_clone = running.clone();
         let addr = server.get_addr();
         ush.set_handler(move || {
-            println!("It works!");
             running_clone.store(false, Ordering::SeqCst);
             let _ = TcpStream::connect(format!("{}:{}", addr.0, addr.1));
         });
