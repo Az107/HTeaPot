@@ -377,7 +377,7 @@ fn main() {
                 r = serve_file(&safe_path);
                 if r.is_some() {
                     // If the file is read successfully, add it to the cache
-                    cache_logger.info(format!("Adding {} to cache", cache_key));
+                    cache_logger.debug(format!("Adding {} to cache", cache_key));
                     cachee.set(cache_key, r.clone().unwrap());
                 }
             } else {
@@ -399,7 +399,7 @@ fn main() {
 
         // Log how long the request took to process
         let elapsed = start_time.elapsed();
-        http_logger.info(format!(
+        http_logger.debug(format!(
             "Request processed in {:.6}ms",
             elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
         ));
