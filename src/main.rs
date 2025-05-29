@@ -220,20 +220,25 @@ fn main() {
     // Determine if the server should proxy all requests
     let proxy_only = config.proxy_rules.get("/").is_some();
 
+    let min_log = if cfg!(debug_assertions) {
+        LogLevel::DEBUG
+    } else {
+        LogLevel::INFO
+    };
     // Initialize the logger based on the config or default to stdout if the log file can't be created
     let logger = match config.log_file.clone() {
         Some(file_name) => {
             let file = fs::File::create(file_name.clone()); // Attempt to create the log file
             match file {
                 // If creating the file fails, log to stdout instead
-                Ok(file) => Logger::new(file, LogLevel::INFO, "main"), // If successful, use the file
+                Ok(file) => Logger::new(file, min_log, "main"), // If successful, use the file
                 Err(e) => {
                     println!("Failed to create log file: {:?}. Using stdout instead.", e);
-                    Logger::new(io::stdout(), LogLevel::INFO, "main") // Log to stdout
+                    Logger::new(io::stdout(), min_log, "main") // Log to stdout
                 }
             }
         }
-        None => Logger::new(io::stdout(), LogLevel::INFO, "main"), // If no log file is specified, use stdout
+        None => Logger::new(io::stdout(), min_log, "main"), // If no log file is specified, use stdout
     };
 
     // Set up the cache with thread-safe locking

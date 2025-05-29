@@ -9,9 +9,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Copy)]
 #[allow(dead_code)]
 pub enum LogLevel {
+    DEBUG,
     INFO,
     WARN,
-    DEBUG,
     ERROR,
     FATAL,
     TRACE,
