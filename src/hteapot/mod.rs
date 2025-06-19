@@ -43,7 +43,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// Crate version as set by `Cargo.toml`.
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Size of the buffer used for reading from the TCP stream.
 const BUFFER_SIZE: usize = 1024 * 2;

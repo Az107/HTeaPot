@@ -53,8 +53,6 @@ use utils::get_mime_tipe;
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 /// Attempts to safely join a root directory and a requested relative path.
 ///
 /// Ensures that the resulting path:
@@ -113,6 +111,7 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
             let url = config.proxy_rules.get(proxy_path).unwrap().clone();
             let mut proxy_req = req.clone();
             proxy_req.path = new_path.to_string();
+            proxy_req.headers.remove("host");
             proxy_req.headers.remove("Host");
             let host_parts: Vec<_> = url.split("://").collect();
             let host = if host_parts.len() == 1 {
@@ -120,7 +119,7 @@ fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> 
             } else {
                 host_parts.last().clone().unwrap()
             };
-            proxy_req.header("Host", host);
+            proxy_req.header("host", host);
             return Some((url, proxy_req));
         }
     }
@@ -173,7 +172,7 @@ fn main() {
     // Parse CLI args and handle --help / --version / --serve flags
     let args = std::env::args().collect::<Vec<String>>();
     if args.len() == 1 {
-        println!("Hteapot {}", VERSION);
+        println!("Hteapot {}", hteapot::VERSION);
         println!("usage: {} <config file>", args[0]);
         return;
     }
@@ -181,12 +180,12 @@ fn main() {
     // Initialize logger based on config or default to stdout
     let config = match args[1].as_str() {
         "--help" | "-h" => {
-            println!("Hteapot {}", VERSION);
+            println!("Hteapot {}", hteapot::VERSION);
             println!("usage: {} <config file>", args[0]);
             return;
         }
         "--version" | "-v" => {
-            println!("Hteapot {}", VERSION);
+            println!("Hteapot {}", hteapot::VERSION);
             return;
         }
         "--serve" | "-s" => {

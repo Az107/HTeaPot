@@ -1,5 +1,5 @@
 // Written by Alberto Ruiz 2024-04-08
-// 
+//
 // This module provides basic HTTP client functionality. It defines
 // methods to compose and send HTTP requests and parse the resulting
 // responses using a `TcpStream`.
@@ -44,7 +44,11 @@ impl HttpRequest {
             path
         };
 
-        let path = if path.is_empty() { "/".to_string() } else { path };
+        let path = if path.is_empty() {
+            "/".to_string()
+        } else {
+            path
+        };
 
         let mut result = format!("{} {} HTTP/1.1\r\n", self.method.to_str(), path);
         for (k, v) in &self.headers {
@@ -76,25 +80,52 @@ impl HttpRequest {
             addr.push_str(":80");
         }
 
+        let addr = addr.split("/").next().unwrap();
         // Resolve address
+        let addr = if addr.starts_with("localhost") {
+            addr.replace("localhost", "127.0.0.1").to_string()
+        } else {
+            addr.to_string()
+        };
         let resolved_addrs: Vec<_> = addr
             .to_socket_addrs()
-            .map_err(|_| "Unable to resolve domain")?
+            .map_err(|_| "Unable to resolve domain: {:?}")?
             .collect();
 
-        let socket_addr = resolved_addrs.first().ok_or("No address found")?;
+        let socket_addr = resolved_addrs
+            .into_iter()
+            .find(|addr| addr.port() != 0 && !addr.ip().is_unspecified())
+            .ok_or("No valid address found")?;
 
         // Connect to server
-        let stream = TcpStream::connect_timeout(socket_addr, Duration::from_secs(5))
+        let stream = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5))
             .map_err(|_| "Error connecting to server")?;
 
         let mut stream = stream;
         let _ = stream.write_all(self.to_string().as_bytes());
         let _ = stream.flush();
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
 
         let mut raw: Vec<u8> = Vec::new();
-        let _ = stream.read_to_end(&mut raw);
+        let mut buffer = [0u8; 4096];
+
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    raw.extend_from_slice(&buffer[..n]);
+                    if n < 4096 {
+                        //TODO: write proper response parser
+                        break;
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    println!("Read timeout");
+                    break;
+                }
+                Err(e) => return Err("Error reading"),
+            }
+        }
 
         Ok(Box::new(HttpResponse::new_raw(raw)))
     }
