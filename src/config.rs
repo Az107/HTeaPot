@@ -196,8 +196,8 @@ impl Config {
         let mut s_path = "./".to_string();
         s_path.push_str(path);
         let serving_path = Path::new(&s_path);
-        let mut file_name = "";
-        let mut root_dir = "".to_string();
+        let file_name: &str;
+        let root_dir: String;
         if serving_path.is_file() {
             let parent_path = serving_path.parent().unwrap();
             root_dir = parent_path.to_str().unwrap().to_string();
