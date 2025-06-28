@@ -43,9 +43,9 @@ mod shutdown;
 mod utils;
 
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::sync::Mutex;
-use std::{io, path::PathBuf};
 
 use cache::Cache;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
@@ -54,47 +54,8 @@ use utils::get_mime_tipe;
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-use http_responders::file::serve_file;
+use http_responders::file::{safe_join_paths, serve_file};
 use http_responders::proxy::is_proxy;
-
-/// Attempts to safely join a root directory and a requested relative path.
-///
-/// Ensures that the resulting path:
-/// - Resolves symbolic links and `..` segments via `canonicalize`
-/// - Remains within the bounds of the specified root directory
-/// - Actually exists on disk
-///
-/// This protects against directory traversal vulnerabilities, such as accessing
-/// files outside of the intended root (e.g., `/etc/passwd`).
-///
-/// # Arguments
-/// * `root` - The root directory from which serving is allowed.
-/// * `requested_path` - The path requested by the client (usually from the URL).
-///
-/// # Returns
-/// `Some(PathBuf)` if the resolved path exists and is within the root. `None` otherwise.
-///
-/// # Example
-/// ```
-/// let safe_path = safe_join_paths("/var/www", "/index.html");
-/// assert!(safe_path.unwrap().ends_with("index.html"));
-/// ```
-fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
-    let root_path = Path::new(root).canonicalize().ok()?;
-    let requested_full_path = root_path.join(requested_path.trim_start_matches("/"));
-
-    if !requested_full_path.exists() {
-        return None;
-    }
-
-    let canonical_path = requested_full_path.canonicalize().ok()?;
-
-    if canonical_path.starts_with(&root_path) {
-        Some(canonical_path)
-    } else {
-        None
-    }
-}
 
 /// Main entry point of the Hteapot server.
 ///
