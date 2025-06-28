@@ -1,9 +1,9 @@
 // Written by Alberto Ruiz 2024-04-07 (Happy 3th monthsary)
-//
+// 
 // This is the config module: responsible for loading application configuration
 // from a file and providing structured access to settings.
 
-use std::{any::Any, collections::HashMap, fs, path::Path};
+use std::{any::Any, collections::HashMap, fs};
 
 /// Dynamic TOML value representation.
 ///
@@ -62,7 +62,7 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
     let mut map = HashMap::new();
     let mut submap = HashMap::new();
     let mut title = "".to_string();
-
+    
     let lines = content.split("\n");
     for line in lines {
         if line.starts_with("#") || line.is_empty() {
@@ -88,13 +88,13 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
             submap = HashMap::new();
             continue;
         }
-
+        
         // Split key and value
         let parts = line.split("=").collect::<Vec<&str>>();
         if parts.len() != 2 {
             continue;
         }
-
+        
         // Remove leading and trailing whitespace
         let key = parts[0]
             .trim()
@@ -103,7 +103,7 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
         if key.is_empty() {
             continue;
         }
-
+        
         // Remove leading and trailing whitespace
         let value = parts[1].trim();
         let value = if value.contains('\'') || value.contains('"') {
@@ -152,14 +152,14 @@ pub fn toml_parser(content: &str) -> HashMap<String, TOMLSchema> {
 /// such as host, port, caching behavior, and proxy rules.
 #[derive(Debug)]
 pub struct Config {
-    pub port: u16,    // Port number to listen
-    pub host: String, // Host name or IP
-    pub root: String, // Root directory to serve files
+    pub port: u16,        // Port number to listen
+    pub host: String,     // Host name or IP
+    pub root: String,     // Root directory to serve files
     pub cache: bool,
     pub cache_ttl: u16,
     pub threads: u16,
     pub log_file: Option<String>,
-    pub index: String, // Index file to serve by default
+    pub index: String,    // Index file to serve by default
     // pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>,
 }
@@ -185,35 +185,6 @@ impl Config {
             index: "index.html".to_string(),
             log_file: None,
             //error: "error.html".to_string(),
-            threads: 1,
-            cache: false,
-            cache_ttl: 0,
-            proxy_rules: HashMap::new(),
-        }
-    }
-
-    pub fn new_serve(path: &str) -> Config {
-        let mut s_path = "./".to_string();
-        s_path.push_str(path);
-        let serving_path = Path::new(&s_path);
-        let file_name: &str;
-        let root_dir: String;
-        if serving_path.is_file() {
-            let parent_path = serving_path.parent().unwrap();
-            root_dir = parent_path.to_str().unwrap().to_string();
-            file_name = serving_path.file_name().unwrap().to_str().unwrap();
-        } else {
-            file_name = "index.html";
-            root_dir = serving_path.to_str().unwrap().to_string();
-        };
-
-        Config {
-            port: 8080,
-            host: "0.0.0.0".to_string(),
-            root: root_dir,
-            index: file_name.to_string(),
-            log_file: None,
-
             threads: 1,
             cache: false,
             cache_ttl: 0,
@@ -253,13 +224,13 @@ impl Config {
 
         // Suggested alternative parsing logic
         // if let Some(proxy_map) = map.get("proxy") {
-        // for k in proxy_map.keys() {
-        // if let Some(url) = proxy_map.get2(k) {
-        // proxy_rules.insert(k.clone(), url);
-        // } else {
-        // println!("Missing or invalid proxy URL for key: {}", k);
-        // }
-        // }
+            // for k in proxy_map.keys() {
+                // if let Some(url) = proxy_map.get2(k) {
+                    // proxy_rules.insert(k.clone(), url);
+                // } else {
+                    // println!("Missing or invalid proxy URL for key: {}", k);
+                // }
+            // }
         // }
 
         // Extract main configuration
@@ -267,6 +238,7 @@ impl Config {
 
         // Suggested alternative parsing logic (Not working)
         // let map = map.get("HTEAPOT").unwrap_or(&TOMLSchema::new());
+
 
         Config {
             port: map.get2("port").unwrap_or(8080),
