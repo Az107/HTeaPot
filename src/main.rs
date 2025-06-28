@@ -37,21 +37,25 @@
 mod cache;
 mod config;
 pub mod hteapot;
+mod http_responders;
 mod logger;
 mod shutdown;
 mod utils;
 
+use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
-use std::{fs, io, path::PathBuf};
+use std::{io, path::PathBuf};
 
 use cache::Cache;
-use config::Config;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use utils::get_mime_tipe;
 
 use logger::{LogLevel, Logger};
 use std::time::Instant;
+
+use http_responders::file::serve_file;
+use http_responders::proxy::is_proxy;
 
 /// Attempts to safely join a root directory and a requested relative path.
 ///
@@ -91,65 +95,6 @@ fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
         None
     }
 }
-
-/// Determines whether a given HTTP request should be proxied based on the configuration.
-///
-/// If a matching proxy rule is found in `config.proxy_rules`, the function rewrites the
-/// request path and updates the `Host` header accordingly.
-///
-/// # Arguments
-/// * `config` - Server configuration containing proxy rules.
-/// * `req` - The original HTTP request.
-///
-/// # Returns
-/// `Some((proxy_url, modified_request))` if the request should be proxied, otherwise `None`.
-fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> {
-    for proxy_path in config.proxy_rules.keys() {
-        let path_match = req.path.strip_prefix(proxy_path);
-        if path_match.is_some() {
-            let new_path = path_match.unwrap();
-            let url = config.proxy_rules.get(proxy_path).unwrap().clone();
-            let mut proxy_req = req.clone();
-            proxy_req.path = new_path.to_string();
-            proxy_req.headers.remove("host");
-            proxy_req.headers.remove("Host");
-            let host_parts: Vec<_> = url.split("://").collect();
-            let host = if host_parts.len() == 1 {
-                host_parts.first().unwrap()
-            } else {
-                host_parts.last().clone().unwrap()
-            };
-            proxy_req.header("host", host);
-            return Some((url, proxy_req));
-        }
-    }
-    None
-}
-
-/// Reads the content of a file from the filesystem.
-///
-/// # Arguments
-/// * `path` - A reference to a `PathBuf` representing the target file.
-///
-/// # Returns
-/// `Some(Vec<u8>)` if the file is read successfully, or `None` if an error occurs.
-///
-/// # Notes
-/// Uses `PathBuf` instead of `&str` to clearly express intent and reduce path handling bugs.
-///
-/// # See Also
-/// [`std::fs::read`](https://doc.rust-lang.org/std/fs/fn.read.html)
-fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
-    let r = fs::read(path);
-    if r.is_ok() { Some(r.unwrap()) } else { None }
-}
-//
-// Suggest to use .ok()? instead of manual unwrap/if is_ok for more idiomatic error handling:
-// fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
-// fs::read(path).ok()
-// }
-//
-//
 
 /// Main entry point of the Hteapot server.
 ///
@@ -274,7 +219,7 @@ fn main() {
     let http_logger = logger.with_component("http");
 
     // Start listening for HTTP requests
-    server.listen(move |req| {
+    server.listen(move |req: HttpRequest| {
         // SERVER CORE: For each incoming request, we handle it in this closure
         let start_time = Instant::now(); // Track request processing time
         let req_method = req.method.to_str(); // Get the HTTP method (e.g., GET, POST)
@@ -284,7 +229,7 @@ fn main() {
         http_logger.info(format!("Request {} {}", req_method, req.path));
 
         // Check if the request should be proxied (either because proxy-only mode is on, or it matches a rule)
-        let is_proxy = is_proxy(&config, req.clone());
+        let is_proxy = is_proxy(&config, req.clone() as HttpRequest);
         if proxy_only || is_proxy.is_some() {
             // If proxying is enabled or this request matches a proxy rule, handle it
             let (host, proxy_req) = is_proxy.unwrap(); // Get the target host and modified request
