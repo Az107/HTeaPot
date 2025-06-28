@@ -189,29 +189,8 @@ fn main() {
             return;
         }
         "--serve" | "-s" => {
-            let mut c = config::Config::new_default();
-            let serving_path = Some(args.get(2).unwrap().clone());
-            let serving_path_str = serving_path.unwrap();
-            let serving_path_str = serving_path_str.as_str();
-            let serving_path = Path::new(serving_path_str);
-            if serving_path.is_dir() {
-                c.root = serving_path.to_str().unwrap_or_default().to_string();
-            } else {
-                c.index = serving_path
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_string();
-                c.root = serving_path
-                    .parent()
-                    .unwrap_or(Path::new("./"))
-                    .to_str()
-                    .unwrap_or_default()
-                    .to_string();
-            }
-            c.host = "0.0.0.0".to_string();
-            c
+            let path = args.get(2).unwrap().clone();
+            config::Config::new_serve(&path)
         }
         _ => config::Config::load_config(&args[1]),
     };
