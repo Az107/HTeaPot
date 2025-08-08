@@ -31,7 +31,7 @@ pub use self::request::HttpRequest;
 pub use engine::Hteapot;
 pub use methods::HttpMethod;
 
-pub use response::{HttpResponse, StreamedResponse};
+pub use response::{HttpResponse, StreamedResponse, TunnelResponse};
 pub use status::HttpStatus;
 
 /// Crate version as set by `Cargo.toml`.

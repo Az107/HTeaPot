@@ -7,14 +7,19 @@
 //!
 //! All response types implement the [`HttpResponseCommon`] trait.
 
+use crate::headers;
+
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
 use std::collections::{HashMap, VecDeque};
+use std::io::Write;
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
-use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
+use std::{io, thread};
 
 /// Basic HTTP status line + headers.
 pub struct BaseResponse {
@@ -62,6 +67,8 @@ pub trait HttpResponseCommon {
 
     /// Advances and returns the next chunk of the response body.
     fn peek(&mut self) -> Result<Vec<u8>, IterError>;
+
+    fn set_stream(&mut self, stream: &TcpStream);
 }
 
 /// Error returned during response iteration.
@@ -165,6 +172,10 @@ impl HttpResponseCommon for HttpResponse {
         let byte_chunk = raw.next().ok_or(IterError::Finished)?.to_vec();
         return Ok(byte_chunk);
     }
+
+    fn set_stream(&mut self, _: &TcpStream) {
+        ()
+    }
 }
 
 /// Dummy response used when nothing needs to be returned.
@@ -182,6 +193,10 @@ impl HttpResponseCommon for EmptyHttpResponse {
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {
         Err(IterError::Finished)
+    }
+
+    fn set_stream(&mut self, _: &TcpStream) {
+        ()
     }
 }
 
@@ -291,5 +306,81 @@ impl HttpResponseCommon for StreamedResponse {
         } else {
             self.queue.pop_front().ok_or(IterError::WouldBlock)
         }
+    }
+
+    fn set_stream(&mut self, _: &TcpStream) {
+        ()
+    }
+}
+
+pub struct TunnelResponse {
+    base: BaseResponse,
+    addr: String,
+    has_end: Arc<AtomicBool>,
+    stream_in: Option<TcpStream>, // In as Stream from the client *in* this server
+    stream_out: Option<TcpStream>, // Out as Stream from the server *to* this server
+}
+
+impl TunnelResponse {
+    pub fn new(addr: &str) -> Box<Self> {
+        return Box::new(TunnelResponse {
+            base: BaseResponse {
+                status: HttpStatus::OK,
+                headers: HashMap::new(),
+                // headers: headers! {"connection" => "keep-alive"}.unwrap(),
+            },
+            addr: addr.to_string(),
+            has_end: Arc::new(AtomicBool::new(false)),
+            stream_in: None,
+            stream_out: None,
+        });
+    }
+}
+
+impl HttpResponseCommon for TunnelResponse {
+    fn base(&mut self) -> &mut BaseResponse {
+        &mut self.base
+    }
+
+    fn next(&mut self) -> Result<Vec<u8>, IterError> {
+        self.peek()
+    }
+
+    fn peek(&mut self) -> Result<Vec<u8>, IterError> {
+        if self.has_end.load(Ordering::SeqCst) {
+            return Err(IterError::Finished);
+        }
+        let mut buf = [0; 1];
+        let r = self.stream_in.as_ref().unwrap().peek(&mut buf);
+
+        return Err(IterError::WouldBlock);
+    }
+
+    fn set_stream(&mut self, stream: &TcpStream) {
+        let mut client_stream = stream.try_clone().expect("clone failed...");
+        self.stream_in = Some(client_stream.try_clone().expect("clone failed..."));
+        let server_stream = TcpStream::connect(&self.addr);
+        if server_stream.is_err() {
+            println!("Error connecting");
+        }
+        let mut server_stream = server_stream.unwrap();
+        let _ = client_stream.set_nonblocking(false);
+        let _ = client_stream.set_nodelay(false);
+        let _ = client_stream.set_read_timeout(Some(Duration::from_secs(3)));
+        let _ = client_stream.set_write_timeout(Some(Duration::from_secs(3)));
+        let _ = client_stream.write_all(&self.base.to_bytes());
+        let mut server_stream_1 = server_stream.try_clone().expect("Error cloning");
+        let mut client_stream_1 = client_stream.try_clone().expect("clone failed...");
+        let has_ended = self.has_end.clone();
+        thread::spawn(move || {
+            let _ = io::copy(&mut client_stream_1, &mut server_stream_1);
+            has_ended.store(true, Ordering::SeqCst);
+        });
+
+        let has_ended = self.has_end.clone();
+        thread::spawn(move || {
+            let _ = io::copy(&mut server_stream, &mut client_stream);
+            has_ended.store(true, Ordering::SeqCst);
+        });
     }
 }

@@ -279,7 +279,7 @@ impl Hteapot {
                 response
                     .base()
                     .headers
-                    .entry("Connection".to_string())
+                    .entry("connection".to_string())
                     .or_insert("keep-alive".to_string());
                 response.base().headers.insert(
                     "Keep-Alive".to_string(),
@@ -293,8 +293,10 @@ impl Hteapot {
             }
             status.write = true;
             status.response = response;
+            status.response.set_stream(&socket_data.stream);
         }
 
+        // Seting the stream in case is needed for the response, (example: streaming)
         // Write the response to the client in chunks
         loop {
             match status.response.peek() {
