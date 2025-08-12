@@ -348,6 +348,12 @@ impl HttpResponseCommon for TunnelResponse {
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {
         if self.has_end.load(Ordering::SeqCst) {
+            if let Some(sock_in) = &self.stream_in {
+                let _ = sock_in.shutdown(std::net::Shutdown::Both);
+            }
+            if let Some(sock_out) = &self.stream_out {
+                let _ = sock_out.shutdown(std::net::Shutdown::Both);
+            }
             return Err(IterError::Finished);
         }
         let mut buf = [0; 1];
@@ -362,12 +368,14 @@ impl HttpResponseCommon for TunnelResponse {
         let server_stream = TcpStream::connect(&self.addr);
         if server_stream.is_err() {
             println!("Error connecting");
+            return;
         }
         let mut server_stream = server_stream.unwrap();
+        self.stream_out = Some(server_stream.try_clone().expect("clone failed..."));
         let _ = client_stream.set_nonblocking(false);
-        let _ = client_stream.set_nodelay(false);
-        let _ = client_stream.set_read_timeout(Some(Duration::from_secs(3)));
-        let _ = client_stream.set_write_timeout(Some(Duration::from_secs(3)));
+        //let _ = client_stream.set_nodelay(false);
+        let _ = client_stream.set_read_timeout(Some(Duration::from_millis(500)));
+        let _ = client_stream.set_write_timeout(Some(Duration::from_millis(500)));
         let _ = client_stream.write_all(&self.base.to_bytes());
         let mut server_stream_1 = server_stream.try_clone().expect("Error cloning");
         let mut client_stream_1 = client_stream.try_clone().expect("clone failed...");

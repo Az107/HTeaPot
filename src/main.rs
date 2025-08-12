@@ -48,6 +48,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use cache::Cache;
+use hteapot::TunnelResponse;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use utils::get_mime_tipe;
 
@@ -177,6 +178,10 @@ fn main() {
                 "Proxying request {} {} to {}",
                 req_method, req_path, host
             ));
+
+            if req.method == hteapot::HttpMethod::CONNECT {
+                return TunnelResponse::new(&req.path);
+            }
 
             // Perform the proxy request (forward the request to the target server)
             let res = proxy_req.brew(host.as_str());
