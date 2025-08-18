@@ -10,9 +10,9 @@
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
-use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -36,13 +36,12 @@ impl BaseResponse {
             self.status.to_string(),
             headers_text
         );
-        
+
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
         response
     }
 }
-
 
 /// Represents a full HTTP response (headers + body).
 pub struct HttpResponse {
@@ -83,13 +82,13 @@ impl HttpResponse {
     ) -> Box<Self> {
         let mut headers = headers.unwrap_or(HashMap::new());
         let content = content.as_ref();
-        
+
         headers.insert("Content-Length".to_string(), content.len().to_string());
         headers.insert(
             "Server".to_string(),
             format!("HTeaPot/{}", VERSION).to_string(),
         );
-        
+
         Box::new(HttpResponse {
             base: BaseResponse { status, headers },
             content: content.to_owned(),
@@ -160,7 +159,7 @@ impl HttpResponseCommon for HttpResponse {
         if self.raw.is_none() {
             self.raw = Some(self.to_bytes());
         }
-        
+
         let raw = self.raw.as_ref().unwrap();
         let mut raw = raw.chunks(BUFFER_SIZE).skip(self.index);
         let byte_chunk = raw.next().ok_or(IterError::Finished)?.to_vec();
@@ -193,7 +192,7 @@ impl ChunkSender {
     /// Sends a new chunk to the output stream.
     ///
     /// Prepends the size in hex followed by CRLF, then the chunk, then another CRLF.
-    
+
     // fn new(sender: Sender<Vec<u8>>) -> Self {
     //     Self(sender)
     // }
@@ -232,14 +231,14 @@ impl StreamedResponse {
             status: HttpStatus::OK,
             headers: HashMap::new(),
         };
-        
+
         base.headers
-        .insert("Transfer-Encoding".to_string(), "chunked".to_string());
+            .insert("Transfer-Encoding".to_string(), "chunked".to_string());
         base.headers.insert(
             "Server".to_string(),
             format!("HTeaPot/{}", VERSION).to_string(),
         );
-        
+
         let _ = tx.send(base.to_bytes());
         let has_end = Arc::new(AtomicBool::new(false));
         let action_clon = action.clone();
@@ -270,7 +269,7 @@ impl HttpResponseCommon for StreamedResponse {
     fn base(&mut self) -> &mut BaseResponse {
         &mut self.base
     }
-    
+
     fn next(&mut self) -> Result<Vec<u8>, IterError> {
         self.peek()
     }

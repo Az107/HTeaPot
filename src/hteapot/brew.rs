@@ -123,7 +123,7 @@ impl HttpRequest {
                     println!("Read timeout");
                     break;
                 }
-                Err(e) => return Err("Error reading"),
+                Err(_) => return Err("Error reading"),
             }
         }
 

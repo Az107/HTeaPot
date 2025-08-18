@@ -127,9 +127,10 @@ impl HttpRequestBuilder {
     fn read_body_len(&mut self) -> Option<()> {
         let body_left = self.body_size.saturating_sub(self.request.body.len());
         let to_take = min(body_left, self.buffer.len());
-        let to_append = &self.buffer[..to_take];
+        let to_append = self.buffer.drain(..to_take);
+        let to_append = to_append.as_slice();
         self.request.body.extend_from_slice(to_append);
-        self.buffer.drain(..to_take);
+        let body_left = self.body_size.saturating_sub(self.request.body.len());
 
         if body_left > 0 {
             return None;
