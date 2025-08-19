@@ -7,8 +7,6 @@
 //!
 //! All response types implement the [`HttpResponseCommon`] trait.
 
-use crate::headers;
-
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
 use std::collections::{HashMap, VecDeque};
@@ -357,7 +355,7 @@ impl HttpResponseCommon for TunnelResponse {
             return Err(IterError::Finished);
         }
         let mut buf = [0; 1];
-        let r = self.stream_in.as_ref().unwrap().peek(&mut buf);
+        let _ = self.stream_in.as_ref().unwrap().peek(&mut buf);
 
         return Err(IterError::WouldBlock);
     }

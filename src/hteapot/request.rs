@@ -252,4 +252,48 @@ impl HttpRequestBuilder {
 #[test]
 fn basic_request() {
     // Placeholder test — add real body/header parsing test here.
+    let buffer = "GET / HTTP/1.1\r\n\r\n".as_bytes().to_vec();
+    let mut request_builder = HttpRequestBuilder::new();
+    let done = request_builder.append(buffer);
+    assert!(done.is_ok());
+    let request = request_builder.get();
+    assert!(request.is_some());
+    let request = request.unwrap();
+    assert!(request.path == "/");
+    assert!(request.method == HttpMethod::GET);
+    assert!(request.headers.len() == 0);
+}
+
+#[cfg(test)]
+#[test]
+fn basic_request_headers() {
+    // Placeholder test — add real body/header parsing test here.
+    let buffer = "GET / HTTP/1.1\r\nHost: test\r\n\r\n".as_bytes().to_vec();
+    let mut request_builder = HttpRequestBuilder::new();
+    let done = request_builder.append(buffer);
+    assert!(done.is_ok());
+    let request = request_builder.get();
+    assert!(request.is_some());
+    let request = request.unwrap();
+    assert!(request.path == "/");
+    assert!(request.method == HttpMethod::GET);
+    assert!(request.headers.len() == 1);
+}
+
+#[cfg(test)]
+#[test]
+fn post_request() {
+    // Placeholder test — add real body/header parsing test here.
+    let buffer = "POST / HTTP/1.1\r\ncontent-length: 4\r\n\r\nhello\r\n"
+        .as_bytes()
+        .to_vec();
+    let mut request_builder = HttpRequestBuilder::new();
+    let done = request_builder.append(buffer);
+    assert!(done.is_ok());
+    let request = request_builder.get();
+    assert!(request.is_some());
+    let request = request.unwrap();
+    assert!(request.path == "/");
+    assert!(request.method == HttpMethod::POST);
+    assert!(request.headers.len() == 1);
 }
