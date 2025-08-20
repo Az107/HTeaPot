@@ -18,6 +18,12 @@ pub fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpReques
         if path_match.is_some() {
             let new_path = path_match.unwrap();
             let url = config.proxy_rules.get(proxy_path).unwrap().clone();
+            let url = if url.is_empty() {
+                let proxy_url = req.headers.get("host")?;
+                proxy_url.to_owned()
+            } else {
+                url
+            };
             let mut proxy_req = req.clone();
             proxy_req.path = new_path.to_string();
             proxy_req.headers.remove("host");

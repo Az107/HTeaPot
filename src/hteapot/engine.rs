@@ -335,7 +335,7 @@ impl Hteapot {
 #[cfg(test)]
 mod tests {
     use crate::{HttpResponse, HttpStatus};
-
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
     use super::*;
 
     #[test]
@@ -344,7 +344,7 @@ mod tests {
         let response = String::from_utf8(response.to_bytes()).unwrap();
         let expected_response = format!(
             "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",
-            "VERSION" //TODO: fix
+            VERSION //TODO: fix
         );
         let expected_response_list = expected_response.split("\r\n");
         for item in expected_response_list {

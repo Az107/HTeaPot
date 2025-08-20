@@ -281,4 +281,20 @@ impl Config {
             proxy_rules,
         }
     }
+
+    pub fn new_proxy() -> Config {
+        let mut proxy_rules = HashMap::new();
+        proxy_rules.insert("/".to_string(), "".to_string());
+        Config {
+            port: 8080,
+            host: "0.0.0.0".to_string(),
+            root: "./".to_string(),
+            cache: false,
+            cache_ttl: 0,
+            threads: 2,
+            log_file: None,
+            index: "index.html".to_string(),
+            proxy_rules,
+        }
+    }
 }

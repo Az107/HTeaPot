@@ -48,6 +48,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use cache::Cache;
+use hteapot::HttpMethod;
 use hteapot::TunnelResponse;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use utils::get_mime_tipe;
@@ -99,6 +100,7 @@ fn main() {
             let path = args.get(2).unwrap().clone();
             config::Config::new_serve(&path)
         }
+        "--proxy" => config::Config::new_proxy(),
         _ => config::Config::load_config(&args[1]),
     };
 
@@ -169,6 +171,9 @@ fn main() {
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
 
+        if proxy_only && req.method == HttpMethod::CONNECT {
+            return TunnelResponse::new(&req.path);
+        }
         // Check if the request should be proxied (either because proxy-only mode is on, or it matches a rule)
         let is_proxy = is_proxy(&config, req.clone() as HttpRequest);
         if proxy_only || is_proxy.is_some() {
