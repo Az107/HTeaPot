@@ -6,7 +6,6 @@
 // - Partial header validation
 // - No URI normalization or encoding
 //
-// ⚠️ A full refactor is recommended before production use.
 
 use super::HttpMethod;
 use std::{cmp::min, collections::HashMap, net::TcpStream, str};

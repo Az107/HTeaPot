@@ -86,7 +86,7 @@ fn main() {
     }
 
     // Initialize logger based on config or default to stdout
-    let config = match args[1].as_str() {
+    let mut config = match args[1].as_str() {
         "--help" | "-h" => {
             println!("Hteapot {}", hteapot::VERSION);
             println!("usage: {} <config file>", args[0]);
@@ -100,9 +100,24 @@ fn main() {
             let path = args.get(2).unwrap().clone();
             config::Config::new_serve(&path)
         }
-        "--proxy" => config::Config::new_proxy(),
+        "--proxy" => {
+            let c = config::Config::new_proxy();
+            c
+        }
         _ => config::Config::load_config(&args[1]),
     };
+
+    if args.contains(&"-p".to_string()) {
+        let i = args.iter().position(|e| *e == "-p".to_string()).unwrap();
+        let port = args[i + 1].clone();
+        let port = port.parse::<u16>();
+        if port.is_err() {
+            println!("Invalid port provided");
+            return;
+        }
+        let port = port.unwrap();
+        config.port = port;
+    }
 
     // Determine if the server should proxy all requests
     let proxy_only = config.proxy_rules.get("/").is_some();
@@ -177,16 +192,20 @@ fn main() {
         // Check if the request should be proxied (either because proxy-only mode is on, or it matches a rule)
         let is_proxy = is_proxy(&config, req.clone() as HttpRequest);
         if proxy_only || is_proxy.is_some() {
+            // ⚠️ TODO: refactor proxy handling
             // If proxying is enabled or this request matches a proxy rule, handle it
-            let (host, proxy_req) = is_proxy.unwrap(); // Get the target host and modified request
+            if req.method == hteapot::HttpMethod::CONNECT {
+                return TunnelResponse::new(&req.path);
+            }
+            if is_proxy.is_none() {
+                return HttpResponse::new(HttpStatus::NotAcceptable, "", None);
+            }
+            let (host, proxy_req) = is_proxy.unwrap();
+            // Get the target host and modified request
             proxy_logger.info(format!(
                 "Proxying request {} {} to {}",
                 req_method, req_path, host
             ));
-
-            if req.method == hteapot::HttpMethod::CONNECT {
-                return TunnelResponse::new(&req.path);
-            }
 
             // Perform the proxy request (forward the request to the target server)
             let res = proxy_req.brew(host.as_str());
