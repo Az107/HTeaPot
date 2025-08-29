@@ -66,7 +66,9 @@ pub trait HttpResponseCommon {
     /// Advances and returns the next chunk of the response body.
     fn peek(&mut self) -> Result<Vec<u8>, IterError>;
 
-    fn set_stream(&mut self, stream: &TcpStream);
+    fn set_stream(&mut self, _stream: &TcpStream) {
+        ()
+    }
 }
 
 /// Error returned during response iteration.
@@ -170,10 +172,6 @@ impl HttpResponseCommon for HttpResponse {
         let byte_chunk = raw.next().ok_or(IterError::Finished)?.to_vec();
         return Ok(byte_chunk);
     }
-
-    fn set_stream(&mut self, _: &TcpStream) {
-        ()
-    }
 }
 
 /// Dummy response used when nothing needs to be returned.
@@ -191,10 +189,6 @@ impl HttpResponseCommon for EmptyHttpResponse {
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {
         Err(IterError::Finished)
-    }
-
-    fn set_stream(&mut self, _: &TcpStream) {
-        ()
     }
 }
 
@@ -305,10 +299,6 @@ impl HttpResponseCommon for StreamedResponse {
             self.queue.pop_front().ok_or(IterError::WouldBlock)
         }
     }
-
-    fn set_stream(&mut self, _: &TcpStream) {
-        ()
-    }
 }
 
 pub struct TunnelResponse {
@@ -371,7 +361,7 @@ impl HttpResponseCommon for TunnelResponse {
         let mut server_stream = server_stream.unwrap();
         self.stream_out = Some(server_stream.try_clone().expect("clone failed..."));
         let _ = client_stream.set_nonblocking(false);
-        //let _ = client_stream.set_nodelay(false);
+        let _ = client_stream.set_nodelay(true);
         let _ = client_stream.set_read_timeout(Some(Duration::from_millis(500)));
         let _ = client_stream.set_write_timeout(Some(Duration::from_millis(500)));
         let _ = client_stream.write_all(&self.base.to_bytes());

@@ -198,6 +198,7 @@ fn main() {
                 return TunnelResponse::new(&req.path);
             }
             if is_proxy.is_none() {
+                proxy_logger.error("Error in proxy".to_string());
                 return HttpResponse::new(HttpStatus::NotAcceptable, "", None);
             }
             let (host, proxy_req) = is_proxy.unwrap();
@@ -213,7 +214,7 @@ fn main() {
             if res.is_ok() {
                 // If the proxy request is successful, log the time taken and return the response
                 let response = res.unwrap();
-                proxy_logger.info(format!(
+                proxy_logger.debug(format!(
                     "Proxy request processed in {:.6}ms",
                     elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
                 ));
