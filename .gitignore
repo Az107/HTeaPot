@@ -6,3 +6,5 @@ src/.DS_Store
 .idea/modules.xml
 .idea/HTeaPot.iml
 *.log
+/moodle
+/php7
