@@ -80,7 +80,8 @@ use crate::utils::Context;
 
 fn serve_cgi(
     program: &String,
-    path: &String,
+    file_dir: &String,
+    file_name: &String,
     request: HttpRequest,
 ) -> Result<Vec<u8>, &'static str> {
     use std::{env, io::Write, process::Stdio};
@@ -93,10 +94,28 @@ fn serve_cgi(
     unsafe {
         //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
         env::set_var("REDIRECT_STATUS", "hteapot");
-        env::set_var("SCRIPT_NAME", path);
-        env::set_var("SCRIPT_FILENAME", path);
-        env::set_var("QUERY_STRING", query);
+        // 1. Información del script y request
+        env::set_var("GATEWAY_INTERFACE", "CGI/1.1");
+        env::set_var("SERVER_PROTOCOL", "HTTP/1.1"); // ej. "HTTP/1.1"
         env::set_var("REQUEST_METHOD", request.method.to_str());
+        env::set_var("QUERY_STRING", query);
+        //env::set_var("REQUEST_URI", &request.path);
+
+        // SCRIPT_NAME = ruta relativa al docroot
+        // SCRIPT_FILENAME = ruta absoluta al script en disco
+        println!("req path: {}", &request.path);
+        println!("filedir: {}", &file_dir);
+        env::set_var("SCRIPT_NAME", &request.path);
+        env::set_var("SCRIPT_FILENAME", format!("{}{}", &file_dir, &request.path));
+
+        // PATH_INFO es opcional, solo si usas /index.php/loquesea
+        env::set_var("PATH_INFO", "");
+
+        // 2. Servidor
+        env::set_var("SERVER_NAME", "localhost"); // ej. "localhost" change to get from config
+        env::set_var("SERVER_PORT", "8081"); // ej. "8080"
+        env::set_var("HTTP_HOST", "localhost:8081"); // ej. "8080"
+        env::set_var("SERVER_SOFTWARE", "hteapot/0.6.2");
     }
     let content_type = request.headers.get("CONTENT_TYPE");
     let content_type = match content_type {
@@ -109,20 +128,24 @@ fn serve_cgi(
         env::set_var("CONTENT_LENGTH", request.body.len().to_string().as_str()); // Longitud del contenido para POST
     }
     let mut child = Command::new(program)
-        .arg(&path)
+        .current_dir(&file_dir)
+        .arg(&file_name)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .expect("Failed to spawn child process");
 
     let stdin = child.stdin.as_mut().expect("msg");
-    stdin
-        .write_all(request.body.as_slice())
-        .expect("Error writing stdin");
+    stdin.write_all(&request.body).expect("Error writing stdin");
     let output = child.wait_with_output();
     match output {
         Ok(output) => {
             if output.status.success() {
+                if let Some(pos) = output.stdout.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let (_headers, second_with_sep) = output.stdout.split_at(pos);
+                    let body = &second_with_sep[4..]; // saltamos el \r\n
+                    return Ok(body.to_vec());
+                }
                 Ok(output.stdout)
             } else {
                 Err("Command exit with non-zero status")
