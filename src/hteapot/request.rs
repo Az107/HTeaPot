@@ -227,7 +227,7 @@ impl HttpRequestBuilder {
                             if kv.len() == 2 {
                                 Some((kv[0].to_string(), kv[1].to_string()))
                             } else {
-                                None
+                                Some((kv[0].to_string(), String::new()))
                             }
                         })
                         .collect();

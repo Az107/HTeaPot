@@ -155,7 +155,7 @@ impl Logger {
                 match msg {
                     Ok(msg) => {
                         let formatted = format!(
-                            "{} [{}] [{}] {}\n",
+                            "\r{} [{}] [{}] {}\n",
                             msg.timestamp, msg.level, msg.component, msg.content
                         );
                         buff.push(formatted);

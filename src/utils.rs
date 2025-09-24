@@ -37,7 +37,7 @@ pub fn get_mime_tipe(path: &String) -> String {
 
     let mimetipe = match extension {
         // Text
-        "html" | "htm" => "text/html; charset=utf-8",
+        "html" | "htm" | "php" => "text/html; charset=utf-8",
         "js" => "text/javascript",
         "mjs" => "text/javascript",
         "css" => "text/css",

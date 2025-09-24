@@ -42,6 +42,7 @@ mod logger;
 mod shutdown;
 mod utils;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -77,18 +78,23 @@ use crate::utils::Context;
 /// - HTTP server via [`Hteapot::new_threaded`](crate::hteapot::Hteapot::new_threaded)
 
 #[cfg(feature = "cgi")]
-
 fn serve_cgi(
     program: &String,
     file_dir: &String,
     file_name: &String,
     request: HttpRequest,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<(HttpStatus, HashMap<String, String>, Vec<u8>), &'static str> {
     use std::{env, io::Write, process::Stdio};
     let query = request
         .args
         .iter()
-        .map(|(key, value)| format!("{key}={value}"))
+        .map(|(key, value)| {
+            if value.is_empty() {
+                key.to_owned()
+            } else {
+                format!("{key}={value}")
+            }
+        })
         .collect::<Vec<_>>()
         .join("&");
     unsafe {
@@ -98,30 +104,38 @@ fn serve_cgi(
         env::set_var("GATEWAY_INTERFACE", "CGI/1.1");
         env::set_var("SERVER_PROTOCOL", "HTTP/1.1"); // ej. "HTTP/1.1"
         env::set_var("REQUEST_METHOD", request.method.to_str());
-        env::set_var("QUERY_STRING", query);
-        //env::set_var("REQUEST_URI", &request.path);
+        env::set_var("QUERY_STRING", &query);
+        env::set_var("REQUEST_URI", format!("{}?{}", request.path, &query));
+
+        if let Some(cookies) = request.headers.get("cookie") {
+            env::set_var("HTTP_COOKIE", cookies);
+        }
 
         // SCRIPT_NAME = ruta relativa al docroot
         // SCRIPT_FILENAME = ruta absoluta al script en disco
-        println!("req path: {}", &request.path);
-        println!("filedir: {}", &file_dir);
         env::set_var("SCRIPT_NAME", &request.path);
         env::set_var("SCRIPT_FILENAME", format!("{}{}", &file_dir, &request.path));
 
         // PATH_INFO es opcional, solo si usas /index.php/loquesea
-        env::set_var("PATH_INFO", "");
+        env::set_var(
+            "PATH_INFO",
+            &request.path.strip_prefix(file_name).unwrap_or("/"),
+        );
 
-        // 2. Servidor
+        // Server info
         env::set_var("SERVER_NAME", "localhost"); // ej. "localhost" change to get from config
         env::set_var("SERVER_PORT", "8081"); // ej. "8080"
         env::set_var("HTTP_HOST", "localhost:8081"); // ej. "8080"
         env::set_var("SERVER_SOFTWARE", "hteapot/0.6.2");
+        env::set_var("REMOTE_ADDR", "localhost"); // this should obtain the real address ?
     }
-    let content_type = request.headers.get("CONTENT_TYPE");
+
+    let content_type = request.headers.get("content-type");
     let content_type = match content_type {
         Some(s) => s.clone(),
         None => "".to_string(),
     };
+
     unsafe {
         //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
         env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
@@ -140,16 +154,27 @@ fn serve_cgi(
     let output = child.wait_with_output();
     match output {
         Ok(output) => {
-            if output.status.success() {
-                if let Some(pos) = output.stdout.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let (_headers, second_with_sep) = output.stdout.split_at(pos);
-                    let body = &second_with_sep[4..]; // saltamos el \r\n
-                    return Ok(body.to_vec());
+            if let Some(pos) = output.stdout.windows(4).position(|w| w == b"\r\n\r\n") {
+                use std::collections::HashMap;
+                let mut status = HttpStatus::OK;
+                let (raw_headers, second_with_sep) = output.stdout.split_at(pos);
+                let body = &second_with_sep[4..];
+                let raw_headers = String::from_utf8(raw_headers.to_vec()).unwrap();
+                let mut headers = HashMap::new();
+                for item in raw_headers.split("\n") {
+                    let (k, v) = item.split_once(":").unwrap();
+                    let k = k.trim().to_string();
+                    let v = v.trim().to_string();
+                    if k.to_lowercase() == "status" {
+                        let status_code: u16 = v.split_once(' ').unwrap().0.parse().unwrap();
+                        status = HttpStatus::from_u16(status_code).unwrap();
+                        continue;
+                    }
+                    headers.insert(k.trim().to_string(), v.trim().to_string());
                 }
-                Ok(output.stdout)
-            } else {
-                Err("Command exit with non-zero status")
+                return Ok((status, headers, body.to_vec()));
             }
+            Ok((HttpStatus::OK, HashMap::new(), output.stdout))
         }
         Err(_) => Err("Error runing command"),
     }
