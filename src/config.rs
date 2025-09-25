@@ -220,6 +220,7 @@ impl Config {
             cache: false,
             cache_ttl: 0,
             proxy_rules: HashMap::new(),
+            cgi_rules: HashMap::new(),
         }
     }
 
@@ -313,6 +314,7 @@ impl Config {
             log_file: None,
             index: "index.html".to_string(),
             proxy_rules,
+            cgi_rules: HashMap::new(),
         }
     }
 }
