@@ -162,6 +162,7 @@ pub struct Config {
     pub index: String, // Index file to serve by default
     // pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>,
+    pub cgi_rules: HashMap<String, String>,
 }
 
 impl Config {
@@ -189,6 +190,7 @@ impl Config {
             cache: false,
             cache_ttl: 0,
             proxy_rules: HashMap::new(),
+            cgi_rules: HashMap::new(),
         }
     }
 
@@ -261,8 +263,23 @@ impl Config {
         // }
         // }
         // }
+        let mut cgi_rules: HashMap<String, String> = HashMap::new();
+        #[cfg(feature = "cgi")]
+        {
+            let cgi_map = map.get("cgi");
+            if cgi_map.is_some() {
+                let cgi_map = cgi_map.unwrap();
+                for k in cgi_map.keys() {
+                    let command = cgi_map.get2(k);
+                    if command.is_none() {
+                        continue;
+                    }
+                    let command = command.unwrap();
+                    cgi_rules.insert(k.clone(), command);
+                }
+            }
+        }
 
-        // Extract main configuration
         let map = map.get("HTEAPOT").unwrap();
 
         // Suggested alternative parsing logic (Not working)
@@ -279,6 +296,7 @@ impl Config {
             log_file: map.get2("log_file"),
             //error: map.get2("error").unwrap_or("error.html".to_string()),
             proxy_rules,
+            cgi_rules,
         }
     }
 

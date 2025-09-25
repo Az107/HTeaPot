@@ -44,6 +44,9 @@ mod utils;
 
 use std::fs;
 use std::io;
+use std::path::Path;
+use std::process::Command;
+
 use std::sync::Mutex;
 
 use cache::Cache;
@@ -72,6 +75,15 @@ use crate::utils::Context;
 /// - Logging (`Logger`)
 /// - Optional response caching
 /// - HTTP server via [`Hteapot::new_threaded`](crate::hteapot::Hteapot::new_threaded)
+
+#[cfg(feature = "cgi")]
+fn serve_cgi(program: &String, path: &String) -> Result<Vec<u8>, &'static str> {
+    let output = Command::new(program).arg(&path).output();
+    match output {
+        Ok(output) => Ok(output.stdout),
+        Err(_) => Err("Error runing command"),
+    }
+}
 
 fn main() {
     // Parse CLI args and handle --help / --version / --serve flags

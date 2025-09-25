@@ -17,6 +17,11 @@ categories = [
 ]
 exclude = ["config.toml", "demo/", "README.md"]
 
+
+[features]
+default = ["cgi"]
+cgi = []
+
 [lib]
 name = "hteapot"
 path = "src/hteapot/mod.rs"
