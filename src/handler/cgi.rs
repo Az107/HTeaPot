@@ -1,4 +1,9 @@
 use std::collections::HashMap;
+use std::{
+    env,
+    io::Write,
+    process::{Command, Stdio},
+};
 
 use crate::hteapot::{HttpRequest, HttpStatus};
 
@@ -37,8 +42,8 @@ pub fn serve_cgi(
         .join("&");
     unsafe {
         //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
-        env::set_var("REDIRECT_STATUS", "hteapot");
-
+        env::set_var("REDIRECT_STATUS", "200");
+        // 1. Información del script y request
         env::set_var("GATEWAY_INTERFACE", "CGI/1.1");
         env::set_var("SERVER_PROTOCOL", "HTTP/1.1"); // ej. "HTTP/1.1"
         env::set_var("REQUEST_METHOD", request.method.to_str());
