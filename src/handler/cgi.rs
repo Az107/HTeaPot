@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::{
-    env,
     io::Write,
     process::{Command, Stdio},
 };
@@ -14,11 +13,6 @@ pub fn serve_cgi(
     file_name: String,
     request: HttpRequest,
 ) -> Result<(HttpStatus, HashMap<String, String>, Vec<u8>), &'static str> {
-    use std::{
-        env,
-        io::Write,
-        process::{Command, Stdio},
-    };
     //THIS LINES ONLY EXIST COS WINDOWS >:C
     let file_dir = if file_dir.starts_with("\\\\?\\") {
         file_dir.strip_prefix("\\\\?\\").unwrap().to_string()
@@ -40,38 +34,42 @@ pub fn serve_cgi(
         })
         .collect::<Vec<_>>()
         .join("&");
-    unsafe {
-        //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
-        env::set_var("REDIRECT_STATUS", "200");
-        // 1. Información del script y request
-        env::set_var("GATEWAY_INTERFACE", "CGI/1.1");
-        env::set_var("SERVER_PROTOCOL", "HTTP/1.1"); // ej. "HTTP/1.1"
-        env::set_var("REQUEST_METHOD", request.method.to_str());
-        env::set_var("QUERY_STRING", &query);
-        env::set_var("REQUEST_URI", format!("{}?{}", request.path, &query));
 
-        if let Some(cookies) = request.headers.get("cookie") {
-            env::set_var("HTTP_COOKIE", cookies);
-        }
+    let mut vars = HashMap::new();
+    vars.insert("REDIRECT_STATUS", "200".to_string());
 
-        // SCRIPT_NAME = ruta relativa al docroot
-        // SCRIPT_FILENAME = ruta absoluta al script en disco
-        env::set_var("SCRIPT_NAME", &file_name);
-        env::set_var("SCRIPT_FILENAME", format!("{}{}", &file_dir, &file_name));
+    // 1. Información del script y request
+    vars.insert("GATEWAY_INTERFACE", "CGI/1.1".to_string());
+    vars.insert("SERVER_PROTOCOL", "HTTP/1.1".to_string()); // ej. "HTTP/1.1"
+    vars.insert("REQUEST_METHOD", request.method.to_str().to_string());
+    vars.insert("QUERY_STRING", query.to_string());
+    vars.insert("REQUEST_URI", format!("{}?{}", request.path, &query));
 
-        // PATH_INFO es opcional, solo si usas /index.php/loquesea
-        env::set_var(
-            "PATH_INFO",
-            request.path.strip_prefix(&file_name).unwrap_or("/"),
-        );
-
-        // Server info
-        env::set_var("SERVER_NAME", "localhost"); // ej. "localhost" change to get from config
-        env::set_var("SERVER_PORT", "8081"); // ej. "8080"
-        env::set_var("HTTP_HOST", "localhost:8081"); // ej. "8080"
-        env::set_var("SERVER_SOFTWARE", "hteapot/0.6.5");
-        env::set_var("REMOTE_ADDR", "localhost"); // this should obtain the real address ?
+    if let Some(cookies) = request.headers.get("cookie") {
+        vars.insert("HTTP_COOKIE", cookies.to_string());
     }
+
+    // SCRIPT_NAME = ruta relativa al docroot
+    // SCRIPT_FILENAME = ruta absoluta al script en disco
+    vars.insert("SCRIPT_NAME", file_name.to_string());
+    vars.insert("SCRIPT_FILENAME", format!("{}{}", &file_dir, &file_name));
+
+    // PATH_INFO es opcional, solo si usas /index.php/loquesea
+    vars.insert(
+        "PATH_INFO",
+        request
+            .path
+            .strip_prefix(&file_name)
+            .unwrap_or("/")
+            .to_string(),
+    );
+
+    // Server info
+    vars.insert("SERVER_NAME", "localhost".to_string()); // ej. "localhost" change to get from config
+    vars.insert("SERVER_PORT", "8081".to_string()); // ej. "8080"
+    vars.insert("HTTP_HOST", "localhost:8081".to_string()); // ej. "8080"
+    vars.insert("SERVER_SOFTWARE", "hteapot/0.6.5".to_string());
+    vars.insert("REMOTE_ADDR", "localhost".to_string()); // this should obtain the real address ?
 
     let content_type = request.headers.get("content-type");
     let content_type = match content_type {
@@ -79,12 +77,11 @@ pub fn serve_cgi(
         None => "".to_string(),
     };
 
-    unsafe {
-        //TODO: !! fix this, avoid using unsafe , this could conflict simultaneous CGI executions, change to fastCGI ?
-        env::set_var("CONTENT_TYPE", content_type); // Tipo de contenido
-        env::set_var("CONTENT_LENGTH", request.body.len().to_string().as_str()); // Longitud del contenido para POST
-    }
+    vars.insert("CONTENT_TYPE", content_type); // Tipo de contenido
+    vars.insert("CONTENT_LENGTH", request.body.len().to_string()); // Longitud del contenido para POST
+
     let mut child = Command::new(program)
+        .envs(vars)
         .current_dir(&file_dir)
         .arg(&file_name)
         .stdin(Stdio::piped())
