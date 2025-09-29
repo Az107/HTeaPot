@@ -32,9 +32,24 @@ use crate::{
 /// ```
 pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     let root_path = Path::new(root).canonicalize().ok()?;
-    let requested_full_path = root_path.join(requested_path.trim_start_matches("/"));
+    let mut requested_full_path = root_path.join(requested_path.trim_start_matches("/"));
 
     if !requested_full_path.exists() {
+        #[cfg(feature = "cgi")]
+        {
+            while !requested_full_path.exists() {
+                let parent = requested_full_path.parent();
+                if parent.is_none() {
+                    return None;
+                }
+                requested_full_path = parent.unwrap().to_path_buf();
+            }
+            if requested_full_path.is_dir() {
+                return None;
+            }
+        }
+
+        #[cfg(not(feature = "cgi"))]
         return None;
     }
 
