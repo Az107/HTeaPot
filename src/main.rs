@@ -43,6 +43,7 @@ mod shutdown;
 mod utils;
 
 use std::fs;
+
 use std::io;
 use std::path::Path;
 use std::sync::Mutex;
@@ -165,8 +166,7 @@ fn main() {
 
     // If proxy-only mode is enabled, issue a warning that local paths won't be used
     if proxy_only {
-        logger
-            .warn("WARNING: All requests are proxied to /. Local paths won't be used.".to_string());
+        logger.warn("All requests are proxied to /. Local paths won't be used.".to_string());
     }
 
     // Create separate loggers for each component (proxy, cache, and HTTP)
