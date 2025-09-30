@@ -20,6 +20,7 @@ use std::time::Duration;
 use std::{io, thread};
 
 /// Basic HTTP status line + headers.
+#[derive(Clone)]
 pub struct BaseResponse {
     pub status: HttpStatus,
     pub headers: HashMap<String, String>,
@@ -47,6 +48,7 @@ impl BaseResponse {
 }
 
 /// Represents a full HTTP response (headers + body).
+#[derive(Clone)]
 pub struct HttpResponse {
     base: BaseResponse,
     pub content: Vec<u8>,

@@ -8,6 +8,7 @@
 //
 
 use super::HttpMethod;
+use std::hash::Hash;
 use std::{cmp::min, collections::HashMap, net::TcpStream, str};
 
 const MAX_HEADER_SIZE: usize = 1024 * 16;
@@ -25,6 +26,29 @@ pub struct HttpRequest {
     pub body: Vec<u8>,
     stream: Option<TcpStream>,
 }
+
+impl Hash for HttpRequest {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.method.hash(state);
+        self.path.hash(state);
+        // self.args.hash(state);
+        // self.headers.hash(state);
+        self.body.hash(state);
+    }
+}
+
+impl PartialEq for HttpRequest {
+    fn eq(&self, other: &Self) -> bool {
+        let same_method = self.method == other.method;
+        let same_path = self.path == other.path;
+        let same_body = self.body == other.body;
+        let same_args = other.args == self.args;
+        let same_headers = self.headers == self.headers;
+        return same_method && same_path && same_body && same_args && same_headers;
+    }
+}
+
+impl Eq for HttpRequest {}
 
 impl HttpRequest {
     /// Creates a new HTTP request with the given method and path.

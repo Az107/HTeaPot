@@ -146,7 +146,8 @@ fn main() {
     // Set up the cache with thread-safe locking
     // The Mutex ensures that only one thread can access the cache at a time,
     // preventing race conditions when reading and writing to the cache.
-    let cache: Mutex<Cache> = Mutex::new(Cache::new(config.cache_ttl as u64)); // Initialize the cache with TTL
+    let cache: Mutex<Cache<HttpRequest, Box<HttpResponse>>> =
+        Mutex::new(Cache::new(config.cache_ttl as u64)); // Initialize the cache with TTL
 
     // Create a new threaded HTTP server with the provided host, port, and number of threads
     let mut server = Hteapot::new_threaded(config.host.as_str(), config.port, config.threads);
@@ -230,6 +231,27 @@ fn main() {
             }
         }
 
+        if config.cache {
+            let cache_start = Instant::now(); // Track cache operation time
+            let mut cache_lock = cache.lock().expect("Error locking cache");
+            if let Some(response) = cache_lock.get(&req) {
+                cache_logger.debug(format!("cache hit for {}", &req.path));
+                let elapsed = start_time.elapsed();
+                http_logger.debug(format!(
+                    "Request processed in {:.6}ms",
+                    elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
+                ));
+                return response;
+            } else {
+                cache_logger.debug(format!("cache miss for {}", &req.path));
+            }
+            let cache_elapsed = cache_start.elapsed();
+            cache_logger.debug(format!(
+                "Cache operation completed in {:.6}µs",
+                cache_elapsed.as_micros()
+            ));
+        }
+
         // If the request is not a proxy request, resolve the requested path safely
         let safe_path_result = if req.path == "/" {
             // Special handling for the root "/" path
@@ -279,37 +301,7 @@ fn main() {
         let mimetype = get_mime_tipe(&safe_path.to_string_lossy().to_string());
 
         // Try to serve the file from the cache, or read it from disk if not cached
-        let content: Option<Vec<u8>> = if config.cache {
-            // Lock the cache to ensure thread-safe access
-            let mut cachee = cache.lock().expect("Error locking cache");
-            let cache_start = Instant::now(); // Track cache operation time
-            let cache_key = req.path.clone(); // Use the request path as the cache key
-            let mut r = cachee.get(cache_key.clone()); // Try to get the content from cache
-            if r.is_none() {
-                // If cache miss, read the file from disk and store it in cache
-                cache_logger.debug(format!("cache miss for {}", cache_key));
-                r = serve_file(&safe_path);
-                if r.is_some() {
-                    // If the file is read successfully, add it to the cache
-                    cache_logger.debug(format!("Adding {} to cache", cache_key));
-                    cachee.set(cache_key, r.clone().unwrap());
-                }
-            } else {
-                // If cache hit, log it
-                cache_logger.debug(format!("cache hit for {}", cache_key));
-            }
-
-            // Log how long the cache operation took
-            let cache_elapsed = cache_start.elapsed();
-            cache_logger.debug(format!(
-                "Cache operation completed in {:.6}µs",
-                cache_elapsed.as_micros()
-            ));
-            r // Return the cached content (or None if not found)
-        } else {
-            // If cache is disabled, read the file from disk
-            serve_file(&safe_path)
-        };
+        let content: Option<Vec<u8>> = serve_file(&safe_path);
 
         // Log how long the request took to process
         let elapsed = start_time.elapsed();
@@ -326,7 +318,12 @@ fn main() {
                     "Content-Type" => mimetype,
                     "X-Content-Type-Options" => "nosniff"
                 );
-                HttpResponse::new(HttpStatus::OK, c, headers)
+                let response = HttpResponse::new(HttpStatus::OK, c, headers);
+                if config.cache {
+                    let mut cache_lock = cache.lock().expect("Error locking cache");
+                    cache_lock.set(req.clone(), response.clone())
+                }
+                response
             }
             None => {
                 // If no content is found, return a 404 Not Found response
