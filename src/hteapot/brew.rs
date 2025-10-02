@@ -14,17 +14,17 @@ use super::response::HttpResponse;
 // use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 impl HttpRequest {
-    /// Adds a query argument to the HTTP request.
-    pub fn arg(&mut self, key: &str, value: &str) -> &mut HttpRequest {
-        self.args.insert(key.to_string(), value.to_string());
-        self
-    }
+    // /// Adds a query argument to the HTTP request.
+    // pub fn arg(&mut self, key: &str, value: &str) -> &mut HttpRequest {
+    //     self.args.insert(key.to_string(), value.to_string());
+    //     self
+    // }
 
-    /// Adds a header to the HTTP request.
-    pub fn header(&mut self, key: &str, value: &str) -> &mut HttpRequest {
-        self.headers.insert(key.to_string(), value.to_string());
-        self
-    }
+    // /// Adds a header to the HTTP request.
+    // pub fn header(&mut self, key: &str, value: &str) -> &mut HttpRequest {
+    //     self.headers.insert(key, value);
+    //     self
+    // }
 
     /// Converts the request into a raw HTTP/1.1-compliant string.
     ///
@@ -144,7 +144,7 @@ pub fn brew(direction: &str, request: &mut HttpRequest) -> Result<Box<HttpRespon
 
 #[cfg(test)]
 mod tests {
-    use super::super::methods::HttpMethod;
+    use super::super::http::HttpMethod;
     use super::*;
     #[test]
     fn test_http_request_new() {
@@ -159,14 +159,14 @@ mod tests {
     #[test]
     fn test_http_request_arg() {
         let mut request = HttpRequest::new(HttpMethod::POST, "/submit");
-        request.arg("key", "value");
+        request.args.insert("key".to_string(), "value".to_string());
         assert_eq!(request.args.get("key"), Some(&"value".to_string()));
     }
 
     #[test]
     fn test_http_request_header() {
         let mut request = HttpRequest::new(HttpMethod::GET, "/data");
-        request.header("Content-Type", "application/json");
+        request.headers.insert("Content-Type", "application/json");
         assert_eq!(
             request.headers.get("Content-Type"),
             Some(&"application/json".to_string())
@@ -183,12 +183,12 @@ mod tests {
     #[test]
     fn test_http_request_to_string() {
         let mut request = HttpRequest::new(HttpMethod::POST, "/resource");
-        request.header("Content-Type", "application/json");
+        request.headers.insert("content-type", "application/json");
         //.body("{\"data\":\"test\"}".to_string());
 
         let request_string = request.to_string();
         assert!(request_string.contains("POST /resource HTTP/1.1"));
-        assert!(request_string.contains("Content-Type: application/json"));
+        assert!(request_string.contains("content-type: application/json"));
         //assert!(request_string.contains("{\"data\":\"test\"}"));
     }
 

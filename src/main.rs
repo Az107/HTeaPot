@@ -36,8 +36,8 @@
 //! See the [`config`](crate::config) module for configuration options and structure.
 mod cache;
 mod config;
+mod handler;
 pub mod hteapot;
-mod http_responders;
 mod logger;
 mod shutdown;
 mod utils;
@@ -56,8 +56,8 @@ use utils::get_mime_tipe;
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-use http_responders::file::{safe_join_paths, serve_file};
-use http_responders::proxy::is_proxy;
+use handler::file::{safe_join_paths, serve_file};
+use handler::proxy::is_proxy;
 
 /// Main entry point of the Hteapot server.
 ///
@@ -186,7 +186,7 @@ fn main() {
 
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
-
+        println!("Headers: {:?}", req.headers);
         if proxy_only && req.method == HttpMethod::CONNECT {
             return TunnelResponse::new(&req.path);
         }
@@ -315,7 +315,7 @@ fn main() {
             Some(c) => {
                 // If content is found, create response with proper headers and a 200 OK status
                 let headers = headers!(
-                    "Content-Type" => mimetype,
+                    "Content-Type" => &mimetype,
                     "X-Content-Type-Options" => "nosniff"
                 );
                 let response = HttpResponse::new(HttpStatus::OK, c, headers);

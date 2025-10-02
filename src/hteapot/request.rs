@@ -8,6 +8,7 @@
 //
 
 use super::HttpMethod;
+use super::http::Headers;
 use std::hash::Hash;
 use std::{cmp::min, collections::HashMap, net::TcpStream, str};
 
@@ -22,7 +23,7 @@ pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
     pub args: HashMap<String, String>,
-    pub headers: HashMap<String, String>,
+    pub headers: Headers,
     pub body: Vec<u8>,
     stream: Option<TcpStream>,
 }
@@ -43,7 +44,7 @@ impl PartialEq for HttpRequest {
         let same_path = self.path == other.path;
         let same_body = self.body == other.body;
         let same_args = other.args == self.args;
-        let same_headers = self.headers == self.headers;
+        let same_headers = self.headers == other.headers;
         return same_method && same_path && same_body && same_args && same_headers;
     }
 }
@@ -57,7 +58,7 @@ impl HttpRequest {
             method,
             path: path.to_string(),
             args: HashMap::new(),
-            headers: HashMap::new(),
+            headers: Headers::new(),
             body: Vec::new(),
             stream: None,
         };
@@ -69,7 +70,7 @@ impl HttpRequest {
             method: HttpMethod::Other(String::new()),
             path: String::new(),
             args: HashMap::new(),
-            headers: HashMap::new(),
+            headers: Headers::new(),
             body: Vec::new(),
             stream: None,
         }
@@ -125,7 +126,7 @@ impl HttpRequestBuilder {
                 method: HttpMethod::GET,
                 path: String::new(),
                 args: HashMap::new(),
-                headers: HashMap::new(),
+                headers: Headers::new(),
                 body: Vec::new(),
                 stream: None,
             },
@@ -256,9 +257,7 @@ impl HttpRequestBuilder {
                         }
                         self.body_size = value.parse().unwrap_or(0);
                     }
-                    self.request
-                        .headers
-                        .insert(key.to_string(), value.to_string());
+                    self.request.headers.insert(&key, value);
                 }
             } else {
                 // Empty line = end of headers

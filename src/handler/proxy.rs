@@ -34,7 +34,7 @@ pub fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpReques
             } else {
                 host_parts.last().clone().unwrap()
             };
-            proxy_req.header("host", host);
+            proxy_req.headers.insert("host", host);
             return Some((url, proxy_req));
         }
     }

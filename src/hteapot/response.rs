@@ -7,9 +7,11 @@
 //!
 //! All response types implement the [`HttpResponseCommon`] trait.
 
+use super::http::Headers;
+
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -23,7 +25,7 @@ use std::{io, thread};
 #[derive(Clone)]
 pub struct BaseResponse {
     pub status: HttpStatus,
-    pub headers: HashMap<String, String>,
+    pub headers: Headers,
 }
 
 impl BaseResponse {
@@ -87,16 +89,13 @@ impl HttpResponse {
     pub fn new<B: AsRef<[u8]>>(
         status: HttpStatus,
         content: B,
-        headers: Option<HashMap<String, String>>,
+        headers: Option<Headers>,
     ) -> Box<Self> {
-        let mut headers = headers.unwrap_or(HashMap::new());
+        let mut headers = headers.unwrap_or(Headers::new());
         let content = content.as_ref();
 
-        headers.insert("Content-Length".to_string(), content.len().to_string());
-        headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
+        headers.insert("Content-Length", &content.len().to_string());
+        headers.insert("Server", &format!("HTeaPot/{}", VERSION).to_string());
 
         Box::new(HttpResponse {
             base: BaseResponse { status, headers },
@@ -112,7 +111,7 @@ impl HttpResponse {
         HttpResponse {
             base: BaseResponse {
                 status: HttpStatus::IAmATeapot,
-                headers: HashMap::new(),
+                headers: Headers::new(),
             },
             content: vec![],
             raw: Some(raw),
@@ -238,15 +237,12 @@ impl StreamedResponse {
 
         let mut base = BaseResponse {
             status: HttpStatus::OK,
-            headers: HashMap::new(),
+            headers: Headers::new(),
         };
 
+        base.headers.insert("Transfer-Encoding", "chunked");
         base.headers
-            .insert("Transfer-Encoding".to_string(), "chunked".to_string());
-        base.headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
+            .insert("Server", &format!("HTeaPot/{}", VERSION));
 
         let _ = tx.send(base.to_bytes());
         let has_end = Arc::new(AtomicBool::new(false));
@@ -316,7 +312,7 @@ impl TunnelResponse {
         return Box::new(TunnelResponse {
             base: BaseResponse {
                 status: HttpStatus::OK,
-                headers: HashMap::new(),
+                headers: Headers::new(),
                 // headers: headers! {"connection" => "keep-alive"}.unwrap(),
             },
             addr: addr.to_string(),

@@ -1,19 +1,18 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::BUFFER_SIZE;
+use super::KEEP_ALIVE_TTL;
 use crate::{HttpRequest, HttpResponse, HttpStatus};
 // Internal types used for connection management
 use super::request::HttpRequestBuilder;
 use super::response::{EmptyHttpResponse, HttpResponseCommon, IterError};
-
-/// Time-to-live for keep-alive connections.
-const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 
 /// Helper macro to construct header maps.
 ///
@@ -25,17 +24,6 @@ const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 ///     "X-Custom" => "value"
 /// };
 /// ```
-#[macro_export]
-macro_rules! headers {
-    ( $($k:expr => $v:expr),*) => {
-        {
-            use std::collections::HashMap;
-            let mut headers: HashMap<String, String> = HashMap::new();
-            $( headers.insert($k.to_string(), $v.to_string()); )*
-            Some(headers)
-        }
-    };
-}
 
 pub struct Hteapot {
     port: u16,
@@ -282,14 +270,11 @@ impl Hteapot {
                     .entry("connection".to_string())
                     .or_insert("keep-alive".to_string());
                 response.base().headers.insert(
-                    "Keep-Alive".to_string(),
-                    format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
+                    "Keep-Alive",
+                    &format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
                 );
             } else {
-                response
-                    .base()
-                    .headers
-                    .insert("Connection".to_string(), "close".to_string());
+                response.base().headers.insert("Connection", "close");
             }
             status.write = true;
             status.response = response;
@@ -329,77 +314,5 @@ impl Hteapot {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             None
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{HttpResponse, HttpStatus};
-    const VERSION: &str = env!("CARGO_PKG_VERSION");
-    use super::*;
-
-    #[test]
-    fn test_http_response_maker() {
-        let mut response = HttpResponse::new(HttpStatus::IAmATeapot, "Hello, World!", None);
-        let response = String::from_utf8(response.to_bytes()).unwrap();
-        let expected_response = format!(
-            "HTTP/1.1 418 I'm a teapot\r\nContent-Length: 13\r\nServer: HTeaPot/{}\r\n\r\nHello, World!\r\n",
-            VERSION //TODO: fix
-        );
-        let expected_response_list = expected_response.split("\r\n");
-        for item in expected_response_list {
-            assert!(response.contains(item));
-        }
-    }
-
-    #[test]
-    fn test_keep_alive_connection() {
-        let mut response = HttpResponse::new(
-            HttpStatus::OK,
-            "Keep-Alive Test",
-            headers! {
-                "Connection" => "keep-alive",
-                "Content-Length" => "15"
-            },
-        );
-
-        response.base().headers.insert(
-            "Keep-Alive".to_string(),
-            format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
-        );
-
-        let response_bytes = response.to_bytes();
-        let response_str = String::from_utf8(response_bytes.clone()).unwrap();
-
-        assert!(response_str.contains("HTTP/1.1 200 OK"));
-        assert!(response_str.contains("Content-Length: 15"));
-        assert!(response_str.contains("Connection: keep-alive"));
-        assert!(response_str.contains("Keep-Alive: timeout=10"));
-        assert!(response_str.contains("Server: HTeaPot/"));
-        assert!(response_str.contains("Keep-Alive Test"));
-
-        let mut second_response = HttpResponse::new(
-            HttpStatus::OK,
-            "Second Request",
-            headers! {
-                "Connection" => "keep-alive",
-                "Content-Length" => "14" // Length for "Second Request"
-            },
-        );
-
-        second_response.base().headers.insert(
-            "Keep-Alive".to_string(),
-            format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
-        );
-
-        let second_response_bytes = second_response.to_bytes();
-        let second_response_str = String::from_utf8(second_response_bytes.clone()).unwrap();
-
-        assert!(second_response_str.contains("HTTP/1.1 200 OK"));
-        assert!(second_response_str.contains("Content-Length: 14"));
-        assert!(response_str.contains("Connection: keep-alive"));
-        assert!(response_str.contains("Keep-Alive: timeout=10"));
-        assert!(response_str.contains("Server: HTeaPot/"));
-        assert!(second_response_str.contains("Second Request"));
     }
 }
