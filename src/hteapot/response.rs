@@ -32,7 +32,7 @@ impl BaseResponse {
     /// Converts the status + headers into a properly formatted HTTP header block.
     pub fn to_bytes(&mut self) -> Vec<u8> {
         let mut headers_text = String::new();
-        for (key, value) in self.headers.iter() {
+        for (key, value) in &self.headers {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
 
@@ -132,7 +132,7 @@ impl HttpResponse {
         }
 
         let mut headers_text = String::new();
-        for (key, value) in self.base.headers.iter() {
+        for (key, value) in self.base.headers.clone() {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
 

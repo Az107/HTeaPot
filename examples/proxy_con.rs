@@ -12,15 +12,11 @@ fn main() {
             let addr = if let Some(addr) = addr {
                 addr
             } else {
-                if let Some(addr) = req.headers.get("Host") {
-                    addr
-                } else {
-                    return HttpResponse::new(
-                        hteapot::HttpStatus::InternalServerError,
-                        "content",
-                        None,
-                    );
-                }
+                return HttpResponse::new(
+                    hteapot::HttpStatus::InternalServerError,
+                    "content",
+                    None,
+                );
             };
             req.brew(addr).unwrap_or(HttpResponse::new(
                 hteapot::HttpStatus::InternalServerError,

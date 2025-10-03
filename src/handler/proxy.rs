@@ -26,7 +26,6 @@ pub fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpReques
             };
             let mut proxy_req = req.clone();
             proxy_req.path = new_path.to_string();
-            proxy_req.headers.remove("host");
             proxy_req.headers.remove("Host");
             let host_parts: Vec<_> = url.split("://").collect();
             let host = if host_parts.len() == 1 {

@@ -258,7 +258,7 @@ impl Hteapot {
         let request = status.request.get()?;
         let keep_alive = request
             .headers
-            .get("connection") //all headers are turn lowercase in the builder
+            .get("connection")
             .map(|v| v.to_lowercase() == "keep-alive")
             .unwrap_or(false);
         if !status.write {
@@ -267,7 +267,7 @@ impl Hteapot {
                 response
                     .base()
                     .headers
-                    .entry("connection".to_string())
+                    .entry("connection")
                     .or_insert("keep-alive".to_string());
                 response.base().headers.insert(
                     "Keep-Alive",

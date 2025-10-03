@@ -186,7 +186,6 @@ fn main() {
 
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
-        println!("Headers: {:?}", req.headers);
         if proxy_only && req.method == HttpMethod::CONNECT {
             return TunnelResponse::new(&req.path);
         }

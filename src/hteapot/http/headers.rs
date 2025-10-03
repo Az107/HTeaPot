@@ -1,11 +1,11 @@
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, hash_map};
+use std::fmt::Display;
 use std::hash::{Hash, Hasher};
-use std::{
-    collections::{HashMap, hash_map},
-    ops::{Deref, DerefMut},
-};
+use std::ops::Deref;
 
 #[derive(Debug, Clone)]
-struct CaseInsensitiveString(String);
+pub struct CaseInsensitiveString(String);
 
 impl PartialEq for CaseInsensitiveString {
     fn eq(&self, other: &Self) -> bool {
@@ -13,6 +13,11 @@ impl PartialEq for CaseInsensitiveString {
     }
 }
 
+impl Display for CaseInsensitiveString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 impl Eq for CaseInsensitiveString {}
 
 impl Hash for CaseInsensitiveString {
@@ -23,8 +28,15 @@ impl Hash for CaseInsensitiveString {
     }
 }
 
+impl Deref for CaseInsensitiveString {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug, Default, Clone)]
-pub struct Headers(HashMap<String, String>);
+pub struct Headers(HashMap<CaseInsensitiveString, String>);
 
 impl Headers {
     pub fn new() -> Self {
@@ -33,17 +45,34 @@ impl Headers {
 
     pub fn insert(&mut self, key: &str, value: &str) {
         // Ejemplo: forzar keys a lowercase
-        self.0.insert(key.to_lowercase(), value.to_string());
+        self.0
+            .insert(CaseInsensitiveString(key.to_string()), value.to_string());
     }
 
     pub fn get(&self, key: &str) -> Option<&String> {
-        self.0.get(&key.to_lowercase())
+        self.0.get(&CaseInsensitiveString(key.to_string()))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn entry(&mut self, key: &str) -> Entry<'_, CaseInsensitiveString, String> {
+        self.0.entry(CaseInsensitiveString(key.to_string()))
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.0.remove(&CaseInsensitiveString(key.to_string()))
     }
 }
 
 impl IntoIterator for Headers {
-    type Item = (String, String);
-    type IntoIter = hash_map::IntoIter<String, String>;
+    type Item = (CaseInsensitiveString, String);
+    type IntoIter = hash_map::IntoIter<CaseInsensitiveString, String>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -51,8 +80,8 @@ impl IntoIterator for Headers {
 }
 
 impl<'a> IntoIterator for &'a Headers {
-    type Item = (&'a String, &'a String);
-    type IntoIter = hash_map::Iter<'a, String, String>;
+    type Item = (&'a CaseInsensitiveString, &'a String);
+    type IntoIter = hash_map::Iter<'a, CaseInsensitiveString, String>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -60,8 +89,8 @@ impl<'a> IntoIterator for &'a Headers {
 }
 
 impl<'a> IntoIterator for &'a mut Headers {
-    type Item = (&'a String, &'a mut String);
-    type IntoIter = hash_map::IterMut<'a, String, String>;
+    type Item = (&'a CaseInsensitiveString, &'a mut String);
+    type IntoIter = hash_map::IterMut<'a, CaseInsensitiveString, String>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter_mut()
@@ -74,19 +103,6 @@ impl PartialEq for Headers {
     }
 }
 
-impl Deref for Headers {
-    type Target = HashMap<String, String>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Headers {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 #[macro_export]
 macro_rules! headers {
     ( $($k:expr => $v:expr),* $(,)? ) => {{
@@ -94,4 +110,26 @@ macro_rules! headers {
         $( headers.insert($k, $v); )*
         Some(headers)
     }};
+}
+
+#[cfg(test)]
+#[test]
+fn test_caseinsensitive() {
+    let mut headers = Headers::new();
+    headers.insert("X-Test-Header", "Value");
+    assert!(headers.get("x-test-header").is_some());
+    assert!(headers.get("x-test-header").unwrap() == "Value");
+    assert!(headers.get("x-test-header").unwrap() != "value");
+}
+
+#[cfg(test)]
+#[test]
+fn test_remove() {
+    let mut headers = Headers::new();
+    headers.insert("X-Test-Header", "Value");
+    assert!(headers.get("x-test-header").is_some());
+    assert!(headers.get("x-test-header").unwrap() == "Value");
+    assert!(headers.get("x-test-header").unwrap() != "value");
+    assert!(headers.remove("x-test-header").is_some());
+    assert!(headers.get("x-test-header").is_none());
 }

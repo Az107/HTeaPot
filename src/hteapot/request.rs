@@ -241,10 +241,10 @@ impl HttpRequestBuilder {
                         return Err("Header number exceed allowed");
                     }
 
-                    let key = key.trim().to_lowercase();
+                    let key = key.trim();
                     let value = value.trim();
 
-                    if key == "content-length" {
+                    if key.to_lowercase() == "content-length" {
                         if self.request.headers.get("content-length").is_some()
                             || self
                                 .request
