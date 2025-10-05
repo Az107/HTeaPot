@@ -35,7 +35,7 @@ pub use http::Headers as HttpHeaders;
 pub use http::HttpMethod;
 
 pub use http::HttpStatus;
-pub use response::{HttpResponse, StreamedResponse, TunnelResponse};
+pub use response::{HttpResponse, HttpResponseCommon, StreamedResponse, TunnelResponse};
 
 /// Crate version as set by `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

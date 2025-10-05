@@ -59,6 +59,8 @@ use std::time::Instant;
 use handler::file::{safe_join_paths, serve_file};
 use handler::proxy::is_proxy;
 
+use crate::handler::get_handler;
+
 /// Main entry point of the Hteapot server.
 ///
 /// Handles command-line interface, config file parsing, optional file-serving mode,
@@ -250,84 +252,18 @@ fn main() {
                 cache_elapsed.as_micros()
             ));
         }
-
-        // If the request is not a proxy request, resolve the requested path safely
-        let safe_path_result = if req.path == "/" {
-            // Special handling for the root "/" path
-            let root_path = Path::new(&config.root).canonicalize();
-            if root_path.is_ok() {
-                // If the root path exists and is valid, try to join the index file
-                let index_path = root_path.unwrap().join(&config.index);
-                if index_path.exists() {
-                    Some(index_path) // If index exists, return its path
-                } else {
-                    None // If no index exists, return None
-                }
-            } else {
-                None // If the root path is invalid, return None
-            }
-        } else {
-            // For any other path, resolve it safely using the `safe_join_paths` function
-            safe_join_paths(&config.root, &req.path)
-        };
-
-        // Handle the case where the resolved path is a directory
-        let safe_path = match safe_path_result {
-            Some(path) => {
-                if path.is_dir() {
-                    // If it's a directory, check for the index file in that directory
-                    let index_path = path.join(&config.index);
-                    if index_path.exists() {
-                        index_path // If index exists, return its path
-                    } else {
-                        // If no index file exists, log a warning and return a 404 response
-                        http_logger
-                            .warn(format!("Index file not found in directory: {}", req.path));
-                        return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
-                    }
-                } else {
-                    path // If it's not a directory, just return the path
-                }
-            }
-            None => {
-                // If the path is invalid or access is denied, return a 404 response
-                http_logger.warn(format!("Path not found or access denied: {}", req.path));
-                return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
-            }
-        };
-
-        // Determine the MIME type for the file based on its extension
-        let mimetype = get_mime_tipe(&safe_path.to_string_lossy().to_string());
-
-        // Try to serve the file from the cache, or read it from disk if not cached
-        let content: Option<Vec<u8>> = serve_file(&safe_path);
-
+        let response = get_handler(&config, &req);
+        if response.is_none() {
+            return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
+        }
+        let response = response.unwrap().run(&req);
         // Log how long the request took to process
         let elapsed = start_time.elapsed();
         http_logger.debug(format!(
             "Request processed in {:.6}ms",
             elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
         ));
-
+        response
         // If content was found, return it with the appropriate headers, otherwise return a 404
-        match content {
-            Some(c) => {
-                // If content is found, create response with proper headers and a 200 OK status
-                let headers = headers!(
-                    "Content-Type" => &mimetype,
-                    "X-Content-Type-Options" => "nosniff"
-                );
-                let response = HttpResponse::new(HttpStatus::OK, c, headers);
-                if config.cache {
-                    let mut cache_lock = cache.lock().expect("Error locking cache");
-                    cache_lock.set(req.clone(), response.clone())
-                }
-                response
-            }
-            None => {
-                // If no content is found, return a 404 Not Found response
-                HttpResponse::new(HttpStatus::NotFound, "Not found", None)
-            }
-        }
     });
 }

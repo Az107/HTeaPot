@@ -1,6 +1,6 @@
 use crate::config::Config;
-use crate::handler::handler::Handler;
-use crate::hteapot::HttpRequest;
+use crate::handler::handler::{Handler, HandlerFactory};
+use crate::hteapot::{HttpMethod, HttpRequest, HttpResponseCommon, TunnelResponse};
 
 /// Determines whether a given HTTP request should be proxied based on the configuration.
 ///
@@ -44,7 +44,16 @@ pub fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpReques
 pub struct ProxyHandler {}
 
 impl Handler for ProxyHandler {
-    fn is(config: &Config, request: &HttpRequest) -> Option<Box<Self>> {
+    fn run(&self, request: &HttpRequest) -> Box<dyn HttpResponseCommon> {
+        if request.method == HttpMethod::OPTIONS {
+            return TunnelResponse::new(&request.path);
+        }
+        request.brew("addr").unwrap()
+    }
+}
+
+impl HandlerFactory for ProxyHandler {
+    fn is(config: &Config, request: &HttpRequest) -> Option<Box<dyn Handler>> {
         for proxy_path in config.proxy_rules.keys() {
             let path_match = request.path.strip_prefix(proxy_path);
             if path_match.is_some() {
@@ -52,9 +61,5 @@ impl Handler for ProxyHandler {
             }
         }
         return None;
-    }
-
-    fn run(&self, request: HttpRequest) -> Box<HttpRequest> {
-        todo!()
     }
 }
