@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::handler::handler::Handler;
+
 /// Attempts to safely join a root directory and a requested relative path.
 ///
 /// Ensures that the resulting path:
@@ -57,4 +59,21 @@ pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
 /// [`std::fs::read`](https://doc.rust-lang.org/std/fs/fn.read.html)
 pub fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
     fs::read(path).ok()
+}
+
+struct FileHandler {}
+
+impl FileHandler {}
+
+impl Handler for FileHandler {
+    fn is(
+        config: &crate::config::Config,
+        request: &crate::hteapot::HttpRequest,
+    ) -> Option<Box<Self>> {
+        Some(Box::new(FileHandler {}))
+    }
+
+    fn run(&self, request: crate::hteapot::HttpRequest) -> Box<crate::hteapot::HttpRequest> {
+        todo!()
+    }
 }

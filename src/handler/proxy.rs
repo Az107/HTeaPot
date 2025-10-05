@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::handler::handler::Handler;
 use crate::hteapot::HttpRequest;
 
 /// Determines whether a given HTTP request should be proxied based on the configuration.
@@ -38,4 +39,22 @@ pub fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpReques
         }
     }
     None
+}
+
+pub struct ProxyHandler {}
+
+impl Handler for ProxyHandler {
+    fn is(config: &Config, request: &HttpRequest) -> Option<Box<Self>> {
+        for proxy_path in config.proxy_rules.keys() {
+            let path_match = request.path.strip_prefix(proxy_path);
+            if path_match.is_some() {
+                return Some(Box::new(ProxyHandler {}));
+            }
+        }
+        return None;
+    }
+
+    fn run(&self, request: HttpRequest) -> Box<HttpRequest> {
+        todo!()
+    }
 }

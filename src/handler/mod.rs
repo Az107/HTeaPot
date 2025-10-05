@@ -1,3 +1,3 @@
 pub mod file;
-pub mod handler;
+mod handler;
 pub mod proxy;
