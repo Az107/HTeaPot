@@ -7,7 +7,7 @@ use crate::{
     handler::handler::{Handler, HandlerFactory},
     headers,
     hteapot::{HttpResponse, HttpStatus},
-    utils::get_mime_tipe,
+    utils::{Context, get_mime_tipe},
 };
 
 /// Attempts to safely join a root directory and a requested relative path.
@@ -49,23 +49,6 @@ pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     }
 }
 
-/// Reads the content of a file from the filesystem.
-///
-/// # Arguments
-/// * `path` - A reference to a `PathBuf` representing the target file.
-///
-/// # Returns
-/// `Some(Vec<u8>)` if the file is read successfully, or `None` if an error occurs.
-///
-/// # Notes
-/// Uses `PathBuf` instead of `&str` to clearly express intent and reduce path handling bugs.
-///
-/// # See Also
-/// [`std::fs::read`](https://doc.rust-lang.org/std/fs/fn.read.html)
-pub fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
-    fs::read(path).ok()
-}
-
 pub struct FileHandler {
     root: String,
     index: String,
@@ -74,12 +57,10 @@ pub struct FileHandler {
 impl FileHandler {}
 
 impl Handler for FileHandler {
-    fn run(
-        &self,
-        request: &crate::hteapot::HttpRequest,
-    ) -> Box<dyn crate::hteapot::HttpResponseCommon> {
+    fn run(&self, ctx: &Context) -> Box<dyn crate::hteapot::HttpResponseCommon> {
+        let logger = ctx.log.with_component("HTTP");
         // If the request is not a proxy request, resolve the requested path safely
-        let safe_path_result = if request.path == "/" {
+        let safe_path_result = if ctx.request.path == "/" {
             // Special handling for the root "/" path
             let root_path = Path::new(&self.root).canonicalize();
             if root_path.is_ok() {
@@ -95,7 +76,7 @@ impl Handler for FileHandler {
             }
         } else {
             // For any other path, resolve it safely using the `safe_join_paths` function
-            safe_join_paths(&self.root, &request.path)
+            safe_join_paths(&self.root, &ctx.request.path)
         };
 
         // Handle the case where the resolved path is a directory
@@ -108,10 +89,10 @@ impl Handler for FileHandler {
                         index_path // If index exists, return its path
                     } else {
                         // If no index file exists, log a warning and return a 404 response
-                        // http_logger.warn(format!(
-                        //     "Index file not found in directory: {}",
-                        //     request.path
-                        // ));
+                        logger.warn(format!(
+                            "Index file not found in directory: {}",
+                            ctx.request.path
+                        ));
                         return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
                     }
                 } else {
@@ -120,7 +101,10 @@ impl Handler for FileHandler {
             }
             None => {
                 // If the path is invalid or access is denied, return a 404 response
-                // http_logger.warn(format!("Path not found or access denied: {}", request.path));
+                logger.warn(format!(
+                    "Path not found or access denied: {}",
+                    ctx.request.path
+                ));
                 return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
             }
         };
@@ -148,13 +132,10 @@ impl Handler for FileHandler {
 }
 
 impl HandlerFactory for FileHandler {
-    fn is(
-        config: &crate::config::Config,
-        _request: &crate::hteapot::HttpRequest,
-    ) -> Option<Box<dyn Handler>> {
+    fn is(ctx: &Context) -> Option<Box<dyn Handler>> {
         Some(Box::new(FileHandler {
-            root: config.root.to_string(),
-            index: config.index.to_string(),
+            root: ctx.config.root.to_string(),
+            index: ctx.config.index.to_string(),
         }))
     }
 }

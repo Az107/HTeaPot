@@ -42,24 +42,24 @@ mod logger;
 mod shutdown;
 mod utils;
 
+use std::any::Any;
 use std::fs;
 use std::io;
-use std::path::Path;
 use std::sync::Mutex;
 
 use cache::Cache;
 use hteapot::HttpMethod;
 use hteapot::TunnelResponse;
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
-use utils::get_mime_tipe;
 
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-use handler::file::{safe_join_paths, serve_file};
 use handler::proxy::is_proxy;
 
+use crate::config::Config;
 use crate::handler::get_handler;
+use crate::utils::Context;
 
 /// Main entry point of the Hteapot server.
 ///
@@ -148,7 +148,7 @@ fn main() {
     // Set up the cache with thread-safe locking
     // The Mutex ensures that only one thread can access the cache at a time,
     // preventing race conditions when reading and writing to the cache.
-    let cache: Mutex<Cache<HttpRequest, Box<HttpResponse>>> =
+    let cache: Mutex<Cache<HttpRequest, HttpResponse>> =
         Mutex::new(Cache::new(config.cache_ttl as u64)); // Initialize the cache with TTL
 
     // Create a new threaded HTTP server with the provided host, port, and number of threads
@@ -184,53 +184,10 @@ fn main() {
         // SERVER CORE: For each incoming request, we handle it in this closure
         let start_time = Instant::now(); // Track request processing time
         let req_method = req.method.to_str(); // Get the HTTP method (e.g., GET, POST)
-        let req_path = req.path.clone(); // Get the requested path
+        //let req_path = req.path.clone(); // Get the requested path
 
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
-        if proxy_only && req.method == HttpMethod::CONNECT {
-            return TunnelResponse::new(&req.path);
-        }
-        // Check if the request should be proxied (either because proxy-only mode is on, or it matches a rule)
-        let is_proxy = is_proxy(&config, req.clone() as HttpRequest);
-        if proxy_only || is_proxy.is_some() {
-            // ⚠️ TODO: refactor proxy handling
-            // If proxying is enabled or this request matches a proxy rule, handle it
-            if req.method == hteapot::HttpMethod::CONNECT {
-                return TunnelResponse::new(&req.path);
-            }
-            if is_proxy.is_none() {
-                proxy_logger.error("Error in proxy".to_string());
-                return HttpResponse::new(HttpStatus::NotAcceptable, "", None);
-            }
-            let (host, proxy_req) = is_proxy.unwrap();
-            // Get the target host and modified request
-            proxy_logger.info(format!(
-                "Proxying request {} {} to {}",
-                req_method, req_path, host
-            ));
-
-            // Perform the proxy request (forward the request to the target server)
-            let res = proxy_req.brew(host.as_str());
-            let elapsed = start_time.elapsed(); // Measure the time taken to process the proxy request
-            if res.is_ok() {
-                // If the proxy request is successful, log the time taken and return the response
-                let response = res.unwrap();
-                proxy_logger.debug(format!(
-                    "Proxy request processed in {:.6}ms",
-                    elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
-                ));
-                return response;
-            } else {
-                // If the proxy request fails, log the error and return a 500 Internal Server Error
-                proxy_logger.error(format!("Proxy request failed: {:?}", res.err()));
-                return HttpResponse::new(
-                    HttpStatus::InternalServerError,
-                    "Internal Server Error",
-                    None,
-                );
-            }
-        }
 
         if config.cache {
             let cache_start = Instant::now(); // Track cache operation time
@@ -242,7 +199,7 @@ fn main() {
                     "Request processed in {:.6}ms",
                     elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
                 ));
-                return response;
+                return Box::new(response);
             } else {
                 cache_logger.debug(format!("cache miss for {}", &req.path));
             }
@@ -252,11 +209,19 @@ fn main() {
                 cache_elapsed.as_micros()
             ));
         }
-        let response = get_handler(&config, &req);
+
+        let ctx = Context {
+            request: &req,
+            log: &logger,
+            config: &config,
+        };
+
+        let response = get_handler(&ctx);
         if response.is_none() {
             return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
         }
-        let response = response.unwrap().run(&req);
+        let response = response.unwrap().run(&ctx);
+
         // Log how long the request took to process
         let elapsed = start_time.elapsed();
         http_logger.debug(format!(

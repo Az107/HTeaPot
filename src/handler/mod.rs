@@ -1,7 +1,6 @@
 use crate::{
-    config::Config,
     handler::handler::{Handler, HandlerFactory},
-    hteapot::HttpRequest,
+    utils::Context,
 };
 
 pub mod file;
@@ -13,13 +12,13 @@ pub mod proxy;
 /// A factory takes a reference to the current `Config` and `HttpRequest`
 /// and returns an `Option<Box<dyn Handler>>`. It returns `Some(handler)`
 /// if it can handle the request, or `None` if it cannot.
-type Factory = fn(&Config, &HttpRequest) -> Option<Box<dyn Handler>>;
+type Factory = fn(&Context) -> Option<Box<dyn Handler>>;
 
 /// List of all available handler factories.
 ///
 /// New handlers can be added to this array to make them available
 /// for request processing.
-static HANDLERS: &[Factory] = &[file::FileHandler::is, proxy::ProxyHandler::is];
+static HANDLERS: &[Factory] = &[proxy::ProxyHandler::is, file::FileHandler::is];
 
 /// Returns the first handler that can process the given request.
 ///
@@ -37,9 +36,9 @@ static HANDLERS: &[Factory] = &[file::FileHandler::is, proxy::ProxyHandler::is];
 ///     // process the response
 /// }
 /// ```
-pub fn get_handler(config: &Config, request: &HttpRequest) -> Option<Box<dyn Handler>> {
+pub fn get_handler(ctx: &Context) -> Option<Box<dyn Handler>> {
     for h in HANDLERS {
-        if let Some(handler) = h(config, request) {
+        if let Some(handler) = h(ctx) {
             return Some(handler);
         }
     }

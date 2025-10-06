@@ -1,9 +1,9 @@
-use crate::{config::Config, hteapot::HttpRequest, hteapot::HttpResponseCommon};
+use crate::{hteapot::HttpResponseCommon, utils::Context};
 
 pub trait Handler {
-    fn run(&self, request: &HttpRequest) -> Box<dyn HttpResponseCommon>;
+    fn run(&self, context: &Context) -> Box<dyn HttpResponseCommon>;
 }
 
 pub trait HandlerFactory {
-    fn is(config: &Config, request: &HttpRequest) -> Option<Box<dyn Handler>>;
+    fn is(context: &Context) -> Option<Box<dyn Handler>>;
 }
