@@ -1,10 +1,5 @@
-use std::path;
-
-use crate::config::Config;
 use crate::handler::handler::{Handler, HandlerFactory};
-use crate::hteapot::{
-    HttpMethod, HttpRequest, HttpResponse, HttpResponseCommon, HttpStatus, TunnelResponse,
-};
+use crate::hteapot::{HttpMethod, HttpResponse, HttpResponseCommon, HttpStatus, TunnelResponse};
 use crate::utils::Context;
 
 /// Determines whether a given HTTP request should be proxied based on the configuration.
@@ -18,33 +13,6 @@ use crate::utils::Context;
 ///
 /// # Returns
 /// `Some((proxy_url, modified_request))` if the request should be proxied, otherwise `None`.
-pub fn is_proxy(config: &Config, req: HttpRequest) -> Option<(String, HttpRequest)> {
-    for proxy_path in config.proxy_rules.keys() {
-        let path_match = req.path.strip_prefix(proxy_path);
-        if path_match.is_some() {
-            let new_path = path_match.unwrap();
-            let url = config.proxy_rules.get(proxy_path).unwrap().clone();
-            let url = if url.is_empty() {
-                let proxy_url = req.headers.get("host")?;
-                proxy_url.to_owned()
-            } else {
-                url
-            };
-            let mut proxy_req = req.clone();
-            proxy_req.path = new_path.to_string();
-            proxy_req.headers.remove("Host");
-            let host_parts: Vec<&str> = url.split("://").collect();
-            let host = if host_parts.len() == 1 {
-                host_parts.first().unwrap()
-            } else {
-                host_parts.last().clone().unwrap()
-            };
-            proxy_req.headers.insert("host", host);
-            return Some((url, proxy_req));
-        }
-    }
-    None
-}
 
 pub struct ProxyHandler {
     new_path: String,
@@ -52,7 +20,8 @@ pub struct ProxyHandler {
 }
 
 impl Handler for ProxyHandler {
-    fn run(&self, ctx: &Context) -> Box<dyn HttpResponseCommon> {
+    fn run(&self, ctx: &mut Context) -> Box<dyn HttpResponseCommon> {
+        let proxy_logger = &ctx.log.with_component("proxy");
         if ctx.request.method == HttpMethod::OPTIONS {
             return TunnelResponse::new(&ctx.request.path);
         }
@@ -66,9 +35,16 @@ impl Handler for ProxyHandler {
             host_parts.last().clone().unwrap()
         };
         proxy_req.headers.insert("host", host);
-        proxy_req
-            .brew(&self.url)
-            .unwrap_or(HttpResponse::new(HttpStatus::NotAcceptable, "", None))
+        let response = proxy_req.brew(&self.url).unwrap_or(HttpResponse::new(
+            HttpStatus::NotAcceptable,
+            "",
+            None,
+        ));
+        if ctx.cache.is_some() {
+            let cache = ctx.cache.as_deref_mut().unwrap();
+            cache.set(ctx.request.clone(), (*response).clone());
+        }
+        response
     }
 }
 

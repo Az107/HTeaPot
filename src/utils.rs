@@ -105,4 +105,5 @@ pub struct Context<'a> {
     pub request: &'a HttpRequest,
     pub log: &'a Logger,
     pub config: &'a Config,
+    pub cache: Option<&'a mut Cache<HttpRequest, HttpResponse>>,
 }

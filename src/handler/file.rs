@@ -57,7 +57,7 @@ pub struct FileHandler {
 impl FileHandler {}
 
 impl Handler for FileHandler {
-    fn run(&self, ctx: &Context) -> Box<dyn crate::hteapot::HttpResponseCommon> {
+    fn run(&self, ctx: &mut Context) -> Box<dyn crate::hteapot::HttpResponseCommon> {
         let logger = ctx.log.with_component("HTTP");
         // If the request is not a proxy request, resolve the requested path safely
         let safe_path_result = if ctx.request.path == "/" {
@@ -121,7 +121,12 @@ impl Handler for FileHandler {
                     "Content-Type" => &mimetype,
                     "X-Content-Type-Options" => "nosniff"
                 );
-                HttpResponse::new(HttpStatus::OK, c, headers)
+                let response = HttpResponse::new(HttpStatus::OK, c, headers);
+                if ctx.cache.is_some() {
+                    let cache = ctx.cache.as_deref_mut().unwrap();
+                    cache.set(ctx.request.clone(), (*response).clone());
+                }
+                response
             }
             None => {
                 // If no content is found, return a 404 Not Found response

@@ -1,7 +1,7 @@
 use crate::{hteapot::HttpResponseCommon, utils::Context};
 
 pub trait Handler {
-    fn run(&self, context: &Context) -> Box<dyn HttpResponseCommon>;
+    fn run(&self, context: &mut Context) -> Box<dyn HttpResponseCommon>;
 }
 
 pub trait HandlerFactory {

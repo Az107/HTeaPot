@@ -42,22 +42,17 @@ mod logger;
 mod shutdown;
 mod utils;
 
-use std::any::Any;
 use std::fs;
 use std::io;
 use std::sync::Mutex;
 
 use cache::Cache;
-use hteapot::HttpMethod;
-use hteapot::TunnelResponse;
+
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-use handler::proxy::is_proxy;
-
-use crate::config::Config;
 use crate::handler::get_handler;
 use crate::utils::Context;
 
@@ -175,7 +170,7 @@ fn main() {
 
     // Create separate loggers for each component (proxy, cache, and HTTP)
     // This allows for more granular control over logging and better separation of concerns
-    let proxy_logger = logger.with_component("proxy");
+
     let cache_logger = logger.with_component("cache");
     let http_logger = logger.with_component("http");
 
@@ -184,7 +179,6 @@ fn main() {
         // SERVER CORE: For each incoming request, we handle it in this closure
         let start_time = Instant::now(); // Track request processing time
         let req_method = req.method.to_str(); // Get the HTTP method (e.g., GET, POST)
-        //let req_path = req.path.clone(); // Get the requested path
 
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
@@ -210,17 +204,22 @@ fn main() {
             ));
         }
 
-        let ctx = Context {
+        let mut ctx = Context {
             request: &req,
             log: &logger,
             config: &config,
+            cache: if config.cache {
+                Some(&mut cache.lock().unwrap())
+            } else {
+                None
+            },
         };
 
         let response = get_handler(&ctx);
         if response.is_none() {
             return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
         }
-        let response = response.unwrap().run(&ctx);
+        let response = response.unwrap().run(&mut ctx);
 
         // Log how long the request took to process
         let elapsed = start_time.elapsed();
