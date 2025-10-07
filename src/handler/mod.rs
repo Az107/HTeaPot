@@ -36,11 +36,28 @@ static HANDLERS: &[Factory] = &[proxy::ProxyHandler::is, file::FileHandler::is];
 ///     // process the response
 /// }
 /// ```
-pub fn get_handler(ctx: &Context) -> Option<Box<dyn Handler>> {
-    for h in HANDLERS {
-        if let Some(handler) = h(ctx) {
-            return Some(handler);
-        }
+
+pub struct HandlerEngine {
+    handlers: Vec<Factory>,
+}
+
+impl HandlerEngine {
+    pub fn new() -> HandlerEngine {
+        let mut handlers = Vec::new();
+        handlers.extend_from_slice(HANDLERS);
+        HandlerEngine { handlers }
     }
-    None
+
+    pub fn add_handler(&mut self, handler: Factory) {
+        self.handlers.insert(0, handler);
+    }
+
+    pub fn get_handler(&self, ctx: &Context) -> Option<Box<dyn Handler>> {
+        for h in self.handlers.iter() {
+            if let Some(handler) = h(ctx) {
+                return Some(handler);
+            }
+        }
+        None
+    }
 }

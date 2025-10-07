@@ -10,22 +10,21 @@ use crate::{
     utils::{Context, get_mime_tipe},
 };
 
-/// Attempts to safely join a root directory and a requested relative path.
+/// Safely joins a root directory with a requested relative path.
 ///
-/// Ensures that the resulting path:
-/// - Resolves symbolic links and `..` segments via `canonicalize`
-/// - Remains within the bounds of the specified root directory
-/// - Actually exists on disk
+/// Ensures that:
+/// - Symbolic links and `..` segments are resolved (`canonicalize`)
+/// - The resulting path stays within `root`
+/// - The path exists on disk
 ///
-/// This protects against directory traversal vulnerabilities, such as accessing
-/// files outside of the intended root (e.g., `/etc/passwd`).
+/// This prevents directory traversal attacks (e.g., accessing `/etc/passwd`).
 ///
 /// # Arguments
-/// * `root` - The root directory from which serving is allowed.
-/// * `requested_path` - The path requested by the client (usually from the URL).
+/// * `root` - Allowed root directory.
+/// * `requested_path` - Path requested by the client.
 ///
 /// # Returns
-/// `Some(PathBuf)` if the resolved path exists and is within the root. `None` otherwise.
+/// `Some(PathBuf)` if the path is valid and exists, `None` otherwise.
 ///
 /// # Example
 /// ```
@@ -41,7 +40,6 @@ pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     }
 
     let canonical_path = requested_full_path.canonicalize().ok()?;
-
     if canonical_path.starts_with(&root_path) {
         Some(canonical_path)
     } else {
@@ -49,6 +47,7 @@ pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     }
 }
 
+/// Handles serving static files from a root directory, including index files.
 pub struct FileHandler {
     root: String,
     index: String,
@@ -59,36 +58,28 @@ impl FileHandler {}
 impl Handler for FileHandler {
     fn run(&self, ctx: &mut Context) -> Box<dyn crate::hteapot::HttpResponseCommon> {
         let logger = ctx.log.with_component("HTTP");
-        // If the request is not a proxy request, resolve the requested path safely
+
+        // Resolve the requested path safely
         let safe_path_result = if ctx.request.path == "/" {
-            // Special handling for the root "/" path
-            let root_path = Path::new(&self.root).canonicalize();
-            if root_path.is_ok() {
-                // If the root path exists and is valid, try to join the index file
-                let index_path = root_path.unwrap().join(&self.index);
-                if index_path.exists() {
-                    Some(index_path) // If index exists, return its path
-                } else {
-                    None // If no index exists, return None
-                }
-            } else {
-                None // If the root path is invalid, return None
-            }
+            // Special handling for the root path: serve the index file
+            Path::new(&self.root)
+                .canonicalize()
+                .ok()
+                .map(|root_path| root_path.join(&self.index))
+                .filter(|index_path| index_path.exists())
         } else {
-            // For any other path, resolve it safely using the `safe_join_paths` function
+            // Other paths: use safe join
             safe_join_paths(&self.root, &ctx.request.path)
         };
 
-        // Handle the case where the resolved path is a directory
+        // Handle directories or invalid paths
         let safe_path = match safe_path_result {
             Some(path) => {
                 if path.is_dir() {
-                    // If it's a directory, check for the index file in that directory
                     let index_path = path.join(&self.index);
                     if index_path.exists() {
-                        index_path // If index exists, return its path
+                        index_path
                     } else {
-                        // If no index file exists, log a warning and return a 404 response
                         logger.warn(format!(
                             "Index file not found in directory: {}",
                             ctx.request.path
@@ -96,11 +87,10 @@ impl Handler for FileHandler {
                         return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
                     }
                 } else {
-                    path // If it's not a directory, just return the path
+                    path
                 }
             }
             None => {
-                // If the path is invalid or access is denied, return a 404 response
                 logger.warn(format!(
                     "Path not found or access denied: {}",
                     ctx.request.path
@@ -109,29 +99,26 @@ impl Handler for FileHandler {
             }
         };
 
-        // Determine the MIME type for the file based on its extension
+        // Determine MIME type
         let mimetype = get_mime_tipe(&safe_path.to_string_lossy().to_string());
 
-        // Try to serve the file from the cache, or read it from disk if not cached
-        let content = fs::read(&safe_path).ok();
-        match content {
-            Some(c) => {
-                // If content is found, create response with proper headers and a 200 OK status
+        // Read file content
+        match fs::read(&safe_path).ok() {
+            Some(content) => {
                 let headers = headers!(
                     "Content-Type" => &mimetype,
                     "X-Content-Type-Options" => "nosniff"
                 );
-                let response = HttpResponse::new(HttpStatus::OK, c, headers);
-                if ctx.cache.is_some() {
-                    let cache = ctx.cache.as_deref_mut().unwrap();
+                let response = HttpResponse::new(HttpStatus::OK, content, headers);
+
+                // Cache the response if caching is enabled
+                if let Some(cache) = ctx.cache.as_deref_mut() {
                     cache.set(ctx.request.clone(), (*response).clone());
                 }
+
                 response
             }
-            None => {
-                // If no content is found, return a 404 Not Found response
-                HttpResponse::new(HttpStatus::NotFound, "Not found", None)
-            }
+            None => HttpResponse::new(HttpStatus::NotFound, "Not found", None),
         }
     }
 }

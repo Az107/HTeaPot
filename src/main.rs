@@ -53,7 +53,7 @@ use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-use crate::handler::get_handler;
+use crate::handler::HandlerEngine;
 use crate::utils::Context;
 
 /// Main entry point of the Hteapot server.
@@ -174,6 +174,7 @@ fn main() {
     let cache_logger = logger.with_component("cache");
     let http_logger = logger.with_component("http");
 
+    let handlers = HandlerEngine::new();
     // Start listening for HTTP requests
     server.listen(move |req: HttpRequest| {
         // SERVER CORE: For each incoming request, we handle it in this closure
@@ -215,7 +216,7 @@ fn main() {
             },
         };
 
-        let response = get_handler(&ctx);
+        let response = handlers.get_handler(&ctx);
         if response.is_none() {
             return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
         }
