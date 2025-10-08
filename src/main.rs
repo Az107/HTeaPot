@@ -44,20 +44,17 @@ mod utils;
 
 use std::fs;
 use std::io;
-use std::path::Path;
 use std::sync::Mutex;
 
 use cache::Cache;
-use hteapot::HttpMethod;
-use hteapot::TunnelResponse;
+
 use hteapot::{Hteapot, HttpRequest, HttpResponse, HttpStatus};
-use utils::get_mime_tipe;
 
 use logger::{LogLevel, Logger};
 use std::time::Instant;
 
-use handler::file::{safe_join_paths, serve_file};
-use handler::proxy::is_proxy;
+use crate::handler::HandlerEngine;
+use crate::utils::Context;
 
 /// Main entry point of the Hteapot server.
 ///
@@ -146,7 +143,7 @@ fn main() {
     // Set up the cache with thread-safe locking
     // The Mutex ensures that only one thread can access the cache at a time,
     // preventing race conditions when reading and writing to the cache.
-    let cache: Mutex<Cache<HttpRequest, Box<HttpResponse>>> =
+    let cache: Mutex<Cache<HttpRequest, HttpResponse>> =
         Mutex::new(Cache::new(config.cache_ttl as u64)); // Initialize the cache with TTL
 
     // Create a new threaded HTTP server with the provided host, port, and number of threads
@@ -173,62 +170,19 @@ fn main() {
 
     // Create separate loggers for each component (proxy, cache, and HTTP)
     // This allows for more granular control over logging and better separation of concerns
-    let proxy_logger = logger.with_component("proxy");
+
     let cache_logger = logger.with_component("cache");
     let http_logger = logger.with_component("http");
 
+    let handlers = HandlerEngine::new();
     // Start listening for HTTP requests
     server.listen(move |req: HttpRequest| {
         // SERVER CORE: For each incoming request, we handle it in this closure
         let start_time = Instant::now(); // Track request processing time
         let req_method = req.method.to_str(); // Get the HTTP method (e.g., GET, POST)
-        let req_path = req.path.clone(); // Get the requested path
 
         // Log the incoming request method and path
         http_logger.info(format!("Request {} {}", req_method, req.path));
-        if proxy_only && req.method == HttpMethod::CONNECT {
-            return TunnelResponse::new(&req.path);
-        }
-        // Check if the request should be proxied (either because proxy-only mode is on, or it matches a rule)
-        let is_proxy = is_proxy(&config, req.clone() as HttpRequest);
-        if proxy_only || is_proxy.is_some() {
-            // ⚠️ TODO: refactor proxy handling
-            // If proxying is enabled or this request matches a proxy rule, handle it
-            if req.method == hteapot::HttpMethod::CONNECT {
-                return TunnelResponse::new(&req.path);
-            }
-            if is_proxy.is_none() {
-                proxy_logger.error("Error in proxy".to_string());
-                return HttpResponse::new(HttpStatus::NotAcceptable, "", None);
-            }
-            let (host, proxy_req) = is_proxy.unwrap();
-            // Get the target host and modified request
-            proxy_logger.info(format!(
-                "Proxying request {} {} to {}",
-                req_method, req_path, host
-            ));
-
-            // Perform the proxy request (forward the request to the target server)
-            let res = proxy_req.brew(host.as_str());
-            let elapsed = start_time.elapsed(); // Measure the time taken to process the proxy request
-            if res.is_ok() {
-                // If the proxy request is successful, log the time taken and return the response
-                let response = res.unwrap();
-                proxy_logger.debug(format!(
-                    "Proxy request processed in {:.6}ms",
-                    elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
-                ));
-                return response;
-            } else {
-                // If the proxy request fails, log the error and return a 500 Internal Server Error
-                proxy_logger.error(format!("Proxy request failed: {:?}", res.err()));
-                return HttpResponse::new(
-                    HttpStatus::InternalServerError,
-                    "Internal Server Error",
-                    None,
-                );
-            }
-        }
 
         if config.cache {
             let cache_start = Instant::now(); // Track cache operation time
@@ -240,7 +194,7 @@ fn main() {
                     "Request processed in {:.6}ms",
                     elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
                 ));
-                return response;
+                return Box::new(response);
             } else {
                 cache_logger.debug(format!("cache miss for {}", &req.path));
             }
@@ -251,56 +205,22 @@ fn main() {
             ));
         }
 
-        // If the request is not a proxy request, resolve the requested path safely
-        let safe_path_result = if req.path == "/" {
-            // Special handling for the root "/" path
-            let root_path = Path::new(&config.root).canonicalize();
-            if root_path.is_ok() {
-                // If the root path exists and is valid, try to join the index file
-                let index_path = root_path.unwrap().join(&config.index);
-                if index_path.exists() {
-                    Some(index_path) // If index exists, return its path
-                } else {
-                    None // If no index exists, return None
-                }
+        let mut ctx = Context {
+            request: &req,
+            log: &logger,
+            config: &config,
+            cache: if config.cache {
+                Some(&mut cache.lock().unwrap())
             } else {
-                None // If the root path is invalid, return None
-            }
-        } else {
-            // For any other path, resolve it safely using the `safe_join_paths` function
-            safe_join_paths(&config.root, &req.path)
+                None
+            },
         };
 
-        // Handle the case where the resolved path is a directory
-        let safe_path = match safe_path_result {
-            Some(path) => {
-                if path.is_dir() {
-                    // If it's a directory, check for the index file in that directory
-                    let index_path = path.join(&config.index);
-                    if index_path.exists() {
-                        index_path // If index exists, return its path
-                    } else {
-                        // If no index file exists, log a warning and return a 404 response
-                        http_logger
-                            .warn(format!("Index file not found in directory: {}", req.path));
-                        return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
-                    }
-                } else {
-                    path // If it's not a directory, just return the path
-                }
-            }
-            None => {
-                // If the path is invalid or access is denied, return a 404 response
-                http_logger.warn(format!("Path not found or access denied: {}", req.path));
-                return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
-            }
-        };
-
-        // Determine the MIME type for the file based on its extension
-        let mimetype = get_mime_tipe(&safe_path.to_string_lossy().to_string());
-
-        // Try to serve the file from the cache, or read it from disk if not cached
-        let content: Option<Vec<u8>> = serve_file(&safe_path);
+        let response = handlers.get_handler(&ctx);
+        if response.is_none() {
+            return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
+        }
+        let response = response.unwrap().run(&mut ctx);
 
         // Log how long the request took to process
         let elapsed = start_time.elapsed();
@@ -308,26 +228,7 @@ fn main() {
             "Request processed in {:.6}ms",
             elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
         ));
-
+        response
         // If content was found, return it with the appropriate headers, otherwise return a 404
-        match content {
-            Some(c) => {
-                // If content is found, create response with proper headers and a 200 OK status
-                let headers = headers!(
-                    "Content-Type" => &mimetype,
-                    "X-Content-Type-Options" => "nosniff"
-                );
-                let response = HttpResponse::new(HttpStatus::OK, c, headers);
-                if config.cache {
-                    let mut cache_lock = cache.lock().expect("Error locking cache");
-                    cache_lock.set(req.clone(), response.clone())
-                }
-                response
-            }
-            None => {
-                // If no content is found, return a 404 Not Found response
-                HttpResponse::new(HttpStatus::NotFound, "Not found", None)
-            }
-        }
     });
 }

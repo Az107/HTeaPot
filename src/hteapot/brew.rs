@@ -168,8 +168,8 @@ mod tests {
         let mut request = HttpRequest::new(HttpMethod::GET, "/data");
         request.headers.insert("Content-Type", "application/json");
         assert_eq!(
-            request.headers.get("Content-Type"),
-            Some(&"application/json".to_string())
+            request.headers.get_owned("Content-Type"),
+            Some("application/json".to_string())
         );
     }
 

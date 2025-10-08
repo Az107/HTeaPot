@@ -31,11 +31,11 @@ use std::time::Duration;
 // Public API exposed by this module
 pub use self::request::HttpRequest;
 pub use engine::Hteapot;
-pub use http::Headers as HttpHeaders;
+pub use http::HttpHeaders;
 pub use http::HttpMethod;
-
 pub use http::HttpStatus;
-pub use response::{HttpResponse, StreamedResponse, TunnelResponse};
+
+pub use response::{HttpResponse, HttpResponseCommon, StreamedResponse, TunnelResponse};
 
 /// Crate version as set by `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -48,7 +48,7 @@ const KEEP_ALIVE_TTL: Duration = Duration::from_secs(10);
 #[cfg(test)]
 mod tests {
     use crate::{HttpResponse, HttpStatus};
-    use http::Headers as HttpHeaders;
+    use http::HttpHeaders;
     const VERSION: &str = env!("CARGO_PKG_VERSION");
     use super::*;
 

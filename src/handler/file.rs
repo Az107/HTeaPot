@@ -3,22 +3,27 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Attempts to safely join a root directory and a requested relative path.
+use crate::{
+    handler::handler::{Handler, HandlerFactory},
+    hteapot::{HttpHeaders, HttpResponse, HttpStatus},
+    utils::{Context, get_mime_tipe},
+};
+
+/// Safely joins a root directory with a requested relative path.
 ///
-/// Ensures that the resulting path:
-/// - Resolves symbolic links and `..` segments via `canonicalize`
-/// - Remains within the bounds of the specified root directory
-/// - Actually exists on disk
+/// Ensures that:
+/// - Symbolic links and `..` segments are resolved (`canonicalize`)
+/// - The resulting path stays within `root`
+/// - The path exists on disk
 ///
-/// This protects against directory traversal vulnerabilities, such as accessing
-/// files outside of the intended root (e.g., `/etc/passwd`).
+/// This prevents directory traversal attacks (e.g., accessing `/etc/passwd`).
 ///
 /// # Arguments
-/// * `root` - The root directory from which serving is allowed.
-/// * `requested_path` - The path requested by the client (usually from the URL).
+/// * `root` - Allowed root directory.
+/// * `requested_path` - Path requested by the client.
 ///
 /// # Returns
-/// `Some(PathBuf)` if the resolved path exists and is within the root. `None` otherwise.
+/// `Some(PathBuf)` if the path is valid and exists, `None` otherwise.
 ///
 /// # Example
 /// ```
@@ -34,7 +39,6 @@ pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     }
 
     let canonical_path = requested_full_path.canonicalize().ok()?;
-
     if canonical_path.starts_with(&root_path) {
         Some(canonical_path)
     } else {
@@ -42,19 +46,86 @@ pub fn safe_join_paths(root: &str, requested_path: &str) -> Option<PathBuf> {
     }
 }
 
-/// Reads the content of a file from the filesystem.
-///
-/// # Arguments
-/// * `path` - A reference to a `PathBuf` representing the target file.
-///
-/// # Returns
-/// `Some(Vec<u8>)` if the file is read successfully, or `None` if an error occurs.
-///
-/// # Notes
-/// Uses `PathBuf` instead of `&str` to clearly express intent and reduce path handling bugs.
-///
-/// # See Also
-/// [`std::fs::read`](https://doc.rust-lang.org/std/fs/fn.read.html)
-pub fn serve_file(path: &PathBuf) -> Option<Vec<u8>> {
-    fs::read(path).ok()
+/// Handles serving static files from a root directory, including index files.
+pub struct FileHandler {
+    root: String,
+    index: String,
+}
+
+impl FileHandler {}
+
+impl Handler for FileHandler {
+    fn run(&self, ctx: &mut Context) -> Box<dyn crate::hteapot::HttpResponseCommon> {
+        let logger = ctx.log.with_component("HTTP");
+
+        // Resolve the requested path safely
+        let safe_path_result = if ctx.request.path == "/" {
+            // Special handling for the root path: serve the index file
+            Path::new(&self.root)
+                .canonicalize()
+                .ok()
+                .map(|root_path| root_path.join(&self.index))
+                .filter(|index_path| index_path.exists())
+        } else {
+            // Other paths: use safe join
+            safe_join_paths(&self.root, &ctx.request.path)
+        };
+
+        // Handle directories or invalid paths
+        let safe_path = match safe_path_result {
+            Some(path) => {
+                if path.is_dir() {
+                    let index_path = path.join(&self.index);
+                    if index_path.exists() {
+                        index_path
+                    } else {
+                        logger.warn(format!(
+                            "Index file not found in directory: {}",
+                            ctx.request.path
+                        ));
+                        return HttpResponse::new(HttpStatus::NotFound, "Index not found", None);
+                    }
+                } else {
+                    path
+                }
+            }
+            None => {
+                logger.warn(format!(
+                    "Path not found or access denied: {}",
+                    ctx.request.path
+                ));
+                return HttpResponse::new(HttpStatus::NotFound, "Not found", None);
+            }
+        };
+
+        // Determine MIME type
+        let mimetype = get_mime_tipe(&safe_path.to_string_lossy().to_string());
+
+        // Read file content
+        match fs::read(&safe_path).ok() {
+            Some(content) => {
+                let mut headers = HttpHeaders::new();
+                headers.insert("Content-Type", &mimetype);
+                headers.insert("X-Content-Type-Options", "nosniff");
+                let response = HttpResponse::new(HttpStatus::OK, content, Some(headers));
+
+                // Cache the response if caching is enabled
+                if let Some(cache) = ctx.cache.as_deref_mut() {
+                    cache.set(ctx.request.clone(), (*response).clone());
+                }
+
+                response
+            }
+            None => HttpResponse::new(HttpStatus::NotFound, "Not found", None),
+        }
+    }
+}
+
+impl HandlerFactory for FileHandler {
+    fn is(ctx: &Context) -> Option<Box<dyn Handler>> {
+        Some(Box::new(FileHandler {
+            root: ctx.config.root.to_string(),
+            index: ctx.config.index.to_string(),
+        }))
+    }
 }

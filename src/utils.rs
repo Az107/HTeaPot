@@ -1,5 +1,12 @@
 use std::path::Path;
 
+use crate::{
+    cache::Cache,
+    config::Config,
+    hteapot::{HttpRequest, HttpResponse},
+    logger::Logger,
+};
+
 /// Returns the MIME type based on the file extension of a given path.
 ///
 /// This function maps common file extensions to their appropriate
@@ -27,7 +34,7 @@ pub fn get_mime_tipe(path: &String) -> String {
     // Suggest using `to_str()` directly on the extension
     // Alternative way to get the extension
     // .and_then(|ext| ext.to_str())
-        
+
     let mimetipe = match extension {
         // Text
         "html" | "htm" => "text/html; charset=utf-8",
@@ -39,7 +46,7 @@ pub fn get_mime_tipe(path: &String) -> String {
         "txt" => "text/plain",
         "md" => "text/markdown",
         "csv" => "text/csv",
-        
+
         // Images
         "ico" => "image/x-icon",
         "png" => "image/png",
@@ -49,19 +56,19 @@ pub fn get_mime_tipe(path: &String) -> String {
         "webp" => "image/webp",
         "bmp" => "image/bmp",
         "tiff" | "tif" => "image/tiff",
-        
+
         // Audio
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "ogg" => "audio/ogg",
         "flac" => "audio/flac",
-        
+
         // Video
         "mp4" => "video/mp4",
         "webm" => "video/webm",
         "avi" => "video/x-msvideo",
         "mkv" => "video/x-matroska",
-        
+
         // Documents
         "pdf" => "application/pdf",
         "doc" => "application/msword",
@@ -70,20 +77,20 @@ pub fn get_mime_tipe(path: &String) -> String {
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "ppt" => "application/vnd.ms-powerpoint",
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        
+
         // Archives
         "zip" => "application/zip",
         "tar" => "application/x-tar",
         "gz" => "application/gzip",
         "7z" => "application/x-7z-compressed",
         "rar" => "application/vnd.rar",
-        
+
         // Fonts
         "ttf" => "font/ttf",
         "otf" => "font/otf",
         "woff" => "font/woff",
         "woff2" => "font/woff2",
-        
+
         // For unknown types, use a safe default
         _ => "application/octet-stream",
     };
@@ -93,3 +100,10 @@ pub fn get_mime_tipe(path: &String) -> String {
 
 //TODO: make a parser args to config
 //pub fn args_to_dict(list: Vec<String>) -> HashMap<String, String> {}
+
+pub struct Context<'a> {
+    pub request: &'a HttpRequest,
+    pub log: &'a Logger,
+    pub config: &'a Config,
+    pub cache: Option<&'a mut Cache<HttpRequest, HttpResponse>>,
+}
