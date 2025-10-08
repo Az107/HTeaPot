@@ -7,7 +7,7 @@
 //!
 //! All response types implement the [`HttpResponseCommon`] trait.
 
-use super::http::Headers;
+use super::HttpHeaders;
 
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
@@ -25,7 +25,7 @@ use std::{io, thread};
 #[derive(Clone)]
 pub struct BaseResponse {
     pub status: HttpStatus,
-    pub headers: Headers,
+    pub headers: HttpHeaders,
 }
 
 impl BaseResponse {
@@ -89,9 +89,9 @@ impl HttpResponse {
     pub fn new<B: AsRef<[u8]>>(
         status: HttpStatus,
         content: B,
-        headers: Option<Headers>,
+        headers: Option<HttpHeaders>,
     ) -> Box<Self> {
-        let mut headers = headers.unwrap_or(Headers::new());
+        let mut headers = headers.unwrap_or(HttpHeaders::new());
         let content = content.as_ref();
 
         headers.insert("Content-Length", &content.len().to_string());
@@ -111,7 +111,7 @@ impl HttpResponse {
         HttpResponse {
             base: BaseResponse {
                 status: HttpStatus::IAmATeapot,
-                headers: Headers::new(),
+                headers: HttpHeaders::new(),
             },
             content: vec![],
             raw: Some(raw),
@@ -237,7 +237,7 @@ impl StreamedResponse {
 
         let mut base = BaseResponse {
             status: HttpStatus::OK,
-            headers: Headers::new(),
+            headers: HttpHeaders::new(),
         };
 
         base.headers.insert("Transfer-Encoding", "chunked");
@@ -312,7 +312,7 @@ impl TunnelResponse {
         return Box::new(TunnelResponse {
             base: BaseResponse {
                 status: HttpStatus::OK,
-                headers: Headers::new(),
+                headers: HttpHeaders::new(),
                 // headers: headers! {"connection" => "keep-alive"}.unwrap(),
             },
             addr: addr.to_string(),

@@ -18,7 +18,7 @@ pub struct ProxyHandler {
 
 impl Handler for ProxyHandler {
     fn run(&self, ctx: &mut Context) -> Box<dyn HttpResponseCommon> {
-        let proxy_logger = &ctx.log.with_component("proxy");
+        let _proxy_logger = &ctx.log.with_component("proxy");
 
         // Return a tunnel response immediately for OPTIONS requests
         if ctx.request.method == HttpMethod::OPTIONS {

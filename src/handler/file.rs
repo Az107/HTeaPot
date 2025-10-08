@@ -5,8 +5,7 @@ use std::{
 
 use crate::{
     handler::handler::{Handler, HandlerFactory},
-    headers,
-    hteapot::{HttpResponse, HttpStatus},
+    hteapot::{HttpHeaders, HttpResponse, HttpStatus},
     utils::{Context, get_mime_tipe},
 };
 
@@ -105,11 +104,10 @@ impl Handler for FileHandler {
         // Read file content
         match fs::read(&safe_path).ok() {
             Some(content) => {
-                let headers = headers!(
-                    "Content-Type" => &mimetype,
-                    "X-Content-Type-Options" => "nosniff"
-                );
-                let response = HttpResponse::new(HttpStatus::OK, content, headers);
+                let mut headers = HttpHeaders::new();
+                headers.insert("Content-Type", &mimetype);
+                headers.insert("X-Content-Type-Options", "nosniff");
+                let response = HttpResponse::new(HttpStatus::OK, content, Some(headers));
 
                 // Cache the response if caching is enabled
                 if let Some(cache) = ctx.cache.as_deref_mut() {

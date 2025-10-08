@@ -36,11 +36,11 @@ impl Deref for CaseInsensitiveString {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Headers(HashMap<CaseInsensitiveString, String>);
+pub struct HttpHeaders(HashMap<CaseInsensitiveString, String>);
 
-impl Headers {
+impl HttpHeaders {
     pub fn new() -> Self {
-        Headers(HashMap::new())
+        HttpHeaders(HashMap::new())
     }
 
     pub fn insert(&mut self, key: &str, value: &str) {
@@ -51,6 +51,10 @@ impl Headers {
 
     pub fn get(&self, key: &str) -> Option<&String> {
         self.0.get(&CaseInsensitiveString(key.to_string()))
+    }
+
+    pub fn get_owned(&self, key: &str) -> Option<String> {
+        self.0.get(&CaseInsensitiveString(key.to_string())).cloned()
     }
 
     pub fn len(&self) -> usize {
@@ -68,9 +72,13 @@ impl Headers {
     pub fn remove(&mut self, key: &str) -> Option<String> {
         self.0.remove(&CaseInsensitiveString(key.to_string()))
     }
+
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, CaseInsensitiveString, String> {
+        self.0.iter()
+    }
 }
 
-impl IntoIterator for Headers {
+impl IntoIterator for HttpHeaders {
     type Item = (CaseInsensitiveString, String);
     type IntoIter = hash_map::IntoIter<CaseInsensitiveString, String>;
 
@@ -79,7 +87,7 @@ impl IntoIterator for Headers {
     }
 }
 
-impl<'a> IntoIterator for &'a Headers {
+impl<'a> IntoIterator for &'a HttpHeaders {
     type Item = (&'a CaseInsensitiveString, &'a String);
     type IntoIter = hash_map::Iter<'a, CaseInsensitiveString, String>;
 
@@ -88,7 +96,7 @@ impl<'a> IntoIterator for &'a Headers {
     }
 }
 
-impl<'a> IntoIterator for &'a mut Headers {
+impl<'a> IntoIterator for &'a mut HttpHeaders {
     type Item = (&'a CaseInsensitiveString, &'a mut String);
     type IntoIter = hash_map::IterMut<'a, CaseInsensitiveString, String>;
 
@@ -97,7 +105,7 @@ impl<'a> IntoIterator for &'a mut Headers {
     }
 }
 
-impl PartialEq for Headers {
+impl PartialEq for HttpHeaders {
     fn eq(&self, other: &Self) -> bool {
         other.0 == self.0
     }
@@ -106,7 +114,7 @@ impl PartialEq for Headers {
 #[macro_export]
 macro_rules! headers {
     ( $($k:expr => $v:expr),* $(,)? ) => {{
-        let mut headers = crate::hteapot::HttpHeaders::new();
+        let mut headers = hteapot::HttpHeaders::new();
         $( headers.insert($k, $v); )*
         Some(headers)
     }};
@@ -115,7 +123,7 @@ macro_rules! headers {
 #[cfg(test)]
 #[test]
 fn test_caseinsensitive() {
-    let mut headers = Headers::new();
+    let mut headers = HttpHeaders::new();
     headers.insert("X-Test-Header", "Value");
     assert!(headers.get("x-test-header").is_some());
     assert!(headers.get("x-test-header").unwrap() == "Value");
@@ -125,7 +133,7 @@ fn test_caseinsensitive() {
 #[cfg(test)]
 #[test]
 fn test_remove() {
-    let mut headers = Headers::new();
+    let mut headers = HttpHeaders::new();
     headers.insert("X-Test-Header", "Value");
     assert!(headers.get("x-test-header").is_some());
     assert!(headers.get("x-test-header").unwrap() == "Value");

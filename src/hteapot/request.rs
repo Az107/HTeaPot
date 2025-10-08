@@ -7,8 +7,8 @@
 // - No URI normalization or encoding
 //
 
+use super::HttpHeaders;
 use super::HttpMethod;
-use super::http::Headers;
 use std::hash::Hash;
 use std::{cmp::min, collections::HashMap, net::TcpStream, str};
 
@@ -23,7 +23,7 @@ pub struct HttpRequest {
     pub method: HttpMethod,
     pub path: String,
     pub args: HashMap<String, String>,
-    pub headers: Headers,
+    pub headers: HttpHeaders,
     pub body: Vec<u8>,
     stream: Option<TcpStream>,
 }
@@ -58,7 +58,7 @@ impl HttpRequest {
             method,
             path: path.to_string(),
             args: HashMap::new(),
-            headers: Headers::new(),
+            headers: HttpHeaders::new(),
             body: Vec::new(),
             stream: None,
         };
@@ -70,7 +70,7 @@ impl HttpRequest {
             method: HttpMethod::Other(String::new()),
             path: String::new(),
             args: HashMap::new(),
-            headers: Headers::new(),
+            headers: HttpHeaders::new(),
             body: Vec::new(),
             stream: None,
         }
@@ -126,7 +126,7 @@ impl HttpRequestBuilder {
                 method: HttpMethod::GET,
                 path: String::new(),
                 args: HashMap::new(),
-                headers: Headers::new(),
+                headers: HttpHeaders::new(),
                 body: Vec::new(),
                 stream: None,
             },
