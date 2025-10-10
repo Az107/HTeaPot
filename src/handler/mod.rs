@@ -3,6 +3,7 @@ use crate::{
     utils::Context,
 };
 
+pub mod cgi;
 pub mod file;
 mod handler;
 pub mod proxy;
@@ -18,7 +19,11 @@ type Factory = fn(&Context) -> Option<Box<dyn Handler>>;
 ///
 /// New handlers can be added to this array to make them available
 /// for request processing.
-static HANDLERS: &[Factory] = &[proxy::ProxyHandler::is, file::FileHandler::is];
+static HANDLERS: &[Factory] = &[
+    cgi::CgiHandler::is,
+    proxy::ProxyHandler::is,
+    file::FileHandler::is,
+];
 
 /// Returns the first handler that can process the given request.
 ///

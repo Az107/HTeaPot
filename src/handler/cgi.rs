@@ -5,6 +5,8 @@ use std::{
     process::{Command, Stdio},
 };
 
+use crate::config::Schema;
+use crate::handler::handler::{Handler, HandlerFactory};
 use crate::hteapot::{HttpRequest, HttpStatus};
 
 #[cfg(feature = "cgi")]
@@ -118,5 +120,52 @@ pub fn serve_cgi(
             Ok((HttpStatus::OK, HashMap::new(), output.stdout))
         }
         Err(_) => Err("Error runing command"),
+    }
+}
+
+// #[cfg(feature = "cgi")]
+// {
+//     let extension = Path::new(&full_path).extension().unwrap();
+//     let extension = extension.to_str().unwrap();
+//     println!("File extension: {}", extension);
+//     let cgi_command = config.cgi_rules.get(extension);
+//     if cgi_command.is_some() {
+//         let cgi_command = cgi_command.unwrap();
+//         logger.msg(format!("Runing {} {}", cgi_command, full_path));
+//         let cgi_result = serve_cgi(cgi_command, &full_path, req);
+
+//         return match cgi_result {
+//             Ok(result) => HttpResponse::new(HttpStatus::OK, result, None),
+//             Err(err) => HttpResponse::new(
+//                 HttpStatus::InternalServerError,
+//                 "Internal server error",
+//                 None,
+//             ),
+//         };
+//     }
+// }
+
+pub struct CgiHandler {
+    program: String,
+}
+
+impl Handler for CgiHandler {
+    fn run(
+        &self,
+        context: &mut crate::utils::Context,
+    ) -> Box<dyn crate::hteapot::HttpResponseCommon> {
+        todo!()
+    }
+}
+
+impl HandlerFactory for CgiHandler {
+    fn is(context: &crate::utils::Context) -> Option<Box<dyn Handler>> {
+        if let Some(cgi_rules) = context.config.get("cgi") {
+            let extension = "sh"; //TODO: get the extension from the real file
+            if let Some(program) = cgi_rules.get_as::<String>(extension) {
+                return Some(Box::new(CgiHandler { program }));
+            }
+        }
+        None
     }
 }

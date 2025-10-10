@@ -22,13 +22,13 @@ pub enum TOMLtype {
 type TOMLSchema = HashMap<String, TOMLtype>;
 
 /// Trait for safely extracting typed values from a `TOMLSchema`.
-trait Schema {
+pub trait Schema {
     /// Attempts to retrieve a value of type `T` from the schema by key.
-    fn get2<T: 'static + Clone>(&self, key: &str) -> Option<T>;
+    fn get_as<T: 'static + Clone>(&self, key: &str) -> Option<T>;
 }
 
 impl Schema for TOMLSchema {
-    fn get2<T: 'static + Clone>(&self, key: &str) -> Option<T> {
+    fn get_as<T: 'static + Clone>(&self, key: &str) -> Option<T> {
         let value = self.get(key)?;
         let value = value.clone();
 
@@ -41,11 +41,7 @@ impl Schema for TOMLSchema {
         };
 
         // Try to downcast to the requested type
-        let r = any_value.downcast_ref::<T>().cloned();
-        if r.is_none() {
-            println!("{} is none", key);
-        }
-        r
+        any_value.downcast_ref::<T>().cloned()
     }
 }
 
@@ -162,7 +158,7 @@ pub struct Config {
     pub index: String, // Index file to serve by default
     // pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>,
-    pub cgi_rules: HashMap<String, String>,
+    extra: HashMap<String, TOMLSchema>,
 }
 
 impl Config {
@@ -190,8 +186,12 @@ impl Config {
             cache: false,
             cache_ttl: 0,
             proxy_rules: HashMap::new(),
-            cgi_rules: HashMap::new(),
+            extra: HashMap::new(),
         }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&TOMLSchema> {
+        self.extra.get(key)
     }
 
     pub fn new_serve(path: &str) -> Config {
@@ -220,7 +220,7 @@ impl Config {
             cache: false,
             cache_ttl: 0,
             proxy_rules: HashMap::new(),
-            cgi_rules: HashMap::new(),
+            extra: HashMap::new(),
         }
     }
 
@@ -236,15 +236,15 @@ impl Config {
 
         // Read the file content
         let content = content.unwrap();
-        let map = toml_parser(&content);
+        let file_map = toml_parser(&content);
 
         // Extract proxy rules
         let mut proxy_rules: HashMap<String, String> = HashMap::new();
-        let proxy_map = map.get("proxy");
+        let proxy_map = file_map.get("proxy");
         if proxy_map.is_some() {
             let proxy_map = proxy_map.unwrap();
             for k in proxy_map.keys() {
-                let url = proxy_map.get2(k);
+                let url = proxy_map.get_as(k);
                 if url.is_none() {
                     println!("Missing or invalid proxy URL for key: {}", k);
                     continue;
@@ -256,48 +256,33 @@ impl Config {
 
         // Suggested alternative parsing logic
         // if let Some(proxy_map) = map.get("proxy") {
-        // for k in proxy_map.keys() {
-        // if let Some(url) = proxy_map.get2(k) {
-        // proxy_rules.insert(k.clone(), url);
-        // } else {
-        // println!("Missing or invalid proxy URL for key: {}", k);
+        //     for k in proxy_map.keys() {
+        //         if let Some(url) = proxy_map.get2(k) {
+        //             proxy_rules.insert(k.clone(), url);
+        //         } else {
+        //             println!("Missing or invalid proxy URL for key: {}", k);
+        //         }
+        //     }
         // }
-        // }
-        // }
-        let mut cgi_rules: HashMap<String, String> = HashMap::new();
-        #[cfg(feature = "cgi")]
-        {
-            let cgi_map = map.get("cgi");
-            if cgi_map.is_some() {
-                let cgi_map = cgi_map.unwrap();
-                for k in cgi_map.keys() {
-                    let command = cgi_map.get2(k);
-                    if command.is_none() {
-                        continue;
-                    }
-                    let command = command.unwrap();
-                    cgi_rules.insert(k.clone(), command);
-                }
-            }
-        }
 
-        let map = map.get("HTEAPOT").unwrap();
+        let map = file_map.get("HTEAPOT").unwrap();
 
         // Suggested alternative parsing logic (Not working)
         // let map = map.get("HTEAPOT").unwrap_or(&TOMLSchema::new());
-
+        println!("tomlschema: {:?}", file_map);
         Config {
-            port: map.get2("port").unwrap_or(8080),
-            host: map.get2("host").unwrap_or("".to_string()),
-            root: map.get2("root").unwrap_or("./".to_string()),
-            threads: map.get2("threads").unwrap_or(1),
-            cache: map.get2("cache").unwrap_or(false),
-            cache_ttl: map.get2("cache_ttl").unwrap_or(3600),
-            index: map.get2("index").unwrap_or("index.html".to_string()),
-            log_file: map.get2("log_file"),
+            port: map.get_as("port").unwrap_or(8080),
+            host: map.get_as("host").unwrap_or("".to_string()),
+            root: map.get_as("root").unwrap_or("./".to_string()),
+            threads: map.get_as("threads").unwrap_or(1),
+            cache: map.get_as("cache").unwrap_or(false),
+            cache_ttl: map.get_as("cache_ttl").unwrap_or(3600),
+            index: map.get_as("index").unwrap_or("index.html".to_string()),
+            log_file: map.get_as("log_file"),
             //error: map.get2("error").unwrap_or("error.html".to_string()),
             proxy_rules,
-            cgi_rules,
+
+            extra: file_map.clone(),
         }
     }
 
@@ -314,7 +299,7 @@ impl Config {
             log_file: None,
             index: "index.html".to_string(),
             proxy_rules,
-            cgi_rules: HashMap::new(),
+            extra: HashMap::new(),
         }
     }
 }
