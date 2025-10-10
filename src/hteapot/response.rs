@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::Duration;
+use std::vec;
 use std::{io, thread};
 
 /// Basic HTTP status line + headers.
@@ -156,9 +157,9 @@ impl HttpResponseCommon for HttpResponse {
     }
 
     fn next(&mut self) -> Result<Vec<u8>, IterError> {
-        let byte_chunk = self.peek()?;
+        //let byte_chunk = self.peek()?;
         self.index += 1;
-        return Ok(byte_chunk);
+        return Ok(Vec::new());
     }
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {

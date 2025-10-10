@@ -33,11 +33,17 @@ pub struct Hteapot {
     shutdown_hooks: Vec<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
+#[derive(PartialEq)]
+enum Status {
+    Read,
+    Write,
+    Finish,
+}
+
 /// Represents the state of a connection's lifecycle.
 struct SocketStatus {
     ttl: Instant,
-    reading: bool,
-    write: bool,
+    status: Status,
     response: Box<dyn HttpResponseCommon>,
     request: HttpRequestBuilder,
     index_writed: usize,
@@ -142,8 +148,7 @@ impl Hteapot {
                         while let Some(stream) = pool.pop_back() {
                             let socket_status = SocketStatus {
                                 ttl: Instant::now(),
-                                reading: true,
-                                write: false,
+                                status: Status::Read,
                                 response: Box::new(EmptyHttpResponse {}),
                                 request: HttpRequestBuilder::new(),
                                 index_writed: 0,
@@ -156,18 +161,16 @@ impl Hteapot {
                         }
                     }
 
-                    {
-                        let mut priority_list = priority_list_clone
-                            .lock()
-                            .expect("Error locking priority list");
-                        priority_list[thread_index as usize] = streams_to_handle.len();
-                    }
+                    // {
+                    //     let mut priority_list = priority_list_clone
+                    //         .lock()
+                    //         .expect("Error locking priority list");
+                    //     priority_list[thread_index as usize] = streams_to_handle.len();
+                    // }
 
                     streams_to_handle.retain_mut(|s| {
-                        if s.status.is_none() {
-                            return false;
-                        }
-                        Hteapot::handle_client(s, &action_clone).is_some()
+                        Hteapot::handle_client(s, &action_clone);
+                        s.status.is_some()
                     });
                 }
             });
@@ -217,102 +220,119 @@ impl Hteapot {
         let status = socket_data.status.as_mut()?;
 
         // Check if the TTL (time-to-live) for the connection has expired.
-        if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL && !status.write {
+        if Instant::now().duration_since(status.ttl) > KEEP_ALIVE_TTL
+            && status.status != Status::Write
+        {
             let _ = socket_data.stream.shutdown(Shutdown::Both);
             return None;
         }
 
-        // If the request is not yet complete, read data from the stream into a buffer.
-        // This ensures that the server can handle partial or chunked requests.
-        if !status.request.done {
-            let mut buffer = [0; BUFFER_SIZE];
-            match socket_data.stream.read(&mut buffer) {
-                Err(e) => match e.kind() {
-                    io::ErrorKind::WouldBlock => return Some(()),
-                    io::ErrorKind::ConnectionReset => return None,
-                    _ => {
-                        eprintln!("Read error: {:?}", e);
-                        return None;
-                    }
-                },
-                Ok(m) => {
-                    if m == 0 {
-                        return None;
-                    }
-                    status.ttl = Instant::now();
-                    let r = status.request.append(buffer[..m].to_vec());
-                    if r.is_err() {
-                        // Early return response if not valid request is sended
-                        let error_msg = r.err().unwrap();
-                        let response =
-                            HttpResponse::new(HttpStatus::BadRequest, error_msg, None).to_bytes();
-                        let _ = socket_data.stream.write(&response);
-                        let _ = socket_data.stream.flush();
-                        let _ = socket_data.stream.shutdown(Shutdown::Both);
-                        return None;
+        match status.status {
+            Status::Read => {
+                if !status.request.done {
+                    let mut buffer = [0; BUFFER_SIZE];
+                    match socket_data.stream.read(&mut buffer) {
+                        Err(e) => match e.kind() {
+                            io::ErrorKind::WouldBlock => return Some(()),
+                            io::ErrorKind::ConnectionReset => return None,
+                            _ => {
+                                eprintln!("Read error: {:?}", e);
+                                return None;
+                            }
+                        },
+                        Ok(m) => {
+                            if m == 0 {
+                                return None;
+                            }
+                            status.ttl = Instant::now();
+                            let r = status.request.append(buffer[..m].to_vec());
+                            if r.is_err() {
+                                // Early return response if not valid request is sended
+                                let error_msg = r.err().unwrap();
+                                let response =
+                                    HttpResponse::new(HttpStatus::BadRequest, error_msg, None)
+                                        .to_bytes();
+                                let _ = socket_data.stream.write(&response);
+                                let _ = socket_data.stream.flush();
+                                let _ = socket_data.stream.shutdown(Shutdown::Both);
+                                return None;
+                            }
+                        }
                     }
                 }
-            }
-        }
-
-        let request = status.request.get()?;
-        let keep_alive = request
-            .headers
-            .get("connection")
-            .map(|v| v.to_lowercase() == "keep-alive")
-            .unwrap_or(false);
-        if !status.write {
-            let mut response = action(request);
-            if keep_alive {
-                response
-                    .base()
+                let request = status.request.get()?;
+                let keep_alive = request
                     .headers
-                    .entry("connection")
-                    .or_insert("keep-alive".to_string());
-                response.base().headers.insert(
-                    "Keep-Alive",
-                    &format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
-                );
-            } else {
-                response.base().headers.insert("Connection", "close");
+                    .get("connection")
+                    .map(|v| v.to_lowercase() == "keep-alive")
+                    .unwrap_or(false);
+
+                let mut response = action(request);
+                if keep_alive {
+                    response
+                        .base()
+                        .headers
+                        .entry("connection")
+                        .or_insert("keep-alive".to_string());
+                    response.base().headers.insert(
+                        "Keep-Alive",
+                        &format!("timeout={}", KEEP_ALIVE_TTL.as_secs()),
+                    );
+                } else {
+                    response.base().headers.insert("Connection", "close");
+                }
+                status.status = Status::Write;
+                status.response = response;
+                status.response.set_stream(&socket_data.stream);
             }
-            status.write = true;
-            status.response = response;
-            status.response.set_stream(&socket_data.stream);
-        }
+            Status::Write => {
+                loop {
+                    match status.response.peek() {
+                        Ok(n) => match socket_data.stream.write(&n) {
+                            Ok(_) => {
+                                status.ttl = Instant::now();
+                                let _ = status.response.next();
+                            }
+                            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Some(()),
+                            Err(e) => {
+                                eprintln!("Write error: {:?}", e);
+                                return None;
+                            }
+                        },
+                        Err(IterError::WouldBlock) => {
+                            status.ttl = Instant::now();
+                            return Some(());
+                        }
+                        Err(_) => break,
+                    }
+                }
+                status.status = Status::Finish;
+                let request = status.request.get()?;
+                let keep_alive = request
+                    .headers
+                    .get("connection")
+                    .map(|v| v.to_lowercase() == "keep-alive")
+                    .unwrap_or(false);
+                if keep_alive {
+                    status.status = Status::Read;
+                    status.index_writed = 0;
+                    status.request = HttpRequestBuilder::new();
+                    return Some(());
+                } else {
+                    let _ = socket_data.stream.shutdown(Shutdown::Both);
+                    return None;
+                }
+            }
+            Status::Finish => {
+                return None;
+            }
+        };
+        Some(())
+
+        // If the request is not yet complete, read data from the stream into a buffer.
+        // This ensures that the server can handle partial or chunked requests.
 
         // Seting the stream in case is needed for the response, (example: streaming)
         // Write the response to the client in chunks
-        loop {
-            match status.response.peek() {
-                Ok(n) => match socket_data.stream.write(&n) {
-                    Ok(_) => {
-                        status.ttl = Instant::now();
-                        let _ = status.response.next();
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Some(()),
-                    Err(e) => {
-                        eprintln!("Write error: {:?}", e);
-                        return None;
-                    }
-                },
-                Err(IterError::WouldBlock) => {
-                    status.ttl = Instant::now();
-                    return Some(());
-                }
-                Err(_) => break,
-            }
-        }
-
-        if keep_alive {
-            status.reading = true;
-            status.write = false;
-            status.index_writed = 0;
-            status.request = HttpRequestBuilder::new();
-            return Some(());
-        } else {
-            let _ = socket_data.stream.shutdown(Shutdown::Both);
-            None
-        }
     }
 }
