@@ -112,10 +112,17 @@ impl HttpRequest {
 pub struct HttpRequestBuilder {
     request: HttpRequest,
     buffer: Vec<u8>,
-    header_done: bool,
-    header_size: usize,
+    state: State,
     body_size: usize,
     pub done: bool,
+}
+
+#[derive(PartialEq)]
+enum State {
+    Init,
+    Headers,
+    Body,
+    Finish,
 }
 
 impl HttpRequestBuilder {
@@ -130,8 +137,7 @@ impl HttpRequestBuilder {
                 body: Vec::new(),
                 stream: None,
             },
-            header_size: 0,
-            header_done: false,
+            state: State::Init,
             body_size: 0,
             buffer: Vec::new(),
             done: false,
@@ -140,10 +146,9 @@ impl HttpRequestBuilder {
 
     /// Returns the built request if parsing is complete.
     pub fn get(&self) -> Option<HttpRequest> {
-        if self.done {
-            return Some(self.request.clone());
-        } else {
-            None
+        match self.state {
+            State::Finish => Some(self.request.clone()),
+            _ => None,
         }
     }
 
@@ -179,95 +184,98 @@ impl HttpRequestBuilder {
     ///
     /// This function may return an error if the header is too large or malformed.
     pub fn append(&mut self, chunk: Vec<u8>) -> Result<(), &'static str> {
-        if !self.header_done && self.buffer.len() > MAX_HEADER_SIZE {
-            return Err("Entity Too large");
-        }
-
         let chunk_size = chunk.len();
         self.buffer.extend(chunk);
 
-        if self.header_done {
-            self.read_body();
-            return Ok(());
-        } else {
-            self.header_size += chunk_size;
-            if self.header_size > MAX_HEADER_SIZE {
-                return Err("Entity Too large");
-            }
-        }
-
-        while let Some(pos) = self.buffer.windows(2).position(|w| w == b"\r\n") {
-            let line = self.buffer.drain(..pos).collect::<Vec<u8>>();
-            self.buffer.drain(..2); // remove CRLF
-
-            let line_str = match str::from_utf8(line.as_slice()) {
-                Ok(v) => v.to_string(),
-                Err(_e) => return Err("No utf-8"),
-            };
-
-            if self.request.path.is_empty() {
-                // This is the request line
-                let parts: Vec<&str> = line_str.split_whitespace().collect();
-                if parts.len() < 2 {
-                    return Ok(());
+        while !self.buffer.is_empty() {
+            match self.state {
+                State::Init => {
+                    let line = get_line(&mut self.buffer);
+                    if line.is_none() {
+                        return Ok(());
+                    }
+                    let line = line.unwrap();
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() != 3 {
+                        return Err("Invalid method + path + version request");
+                    }
+                    self.request.method = HttpMethod::from_str(parts[0]);
+                    let path_parts: Vec<&str> = parts[1].split('?').collect();
+                    self.request.path = path_parts[0].to_string();
+                    if path_parts.len() > 1 {
+                        self.request.args = path_parts[1]
+                            .split('&')
+                            .filter_map(|pair| {
+                                let kv: Vec<&str> = pair.split('=').collect();
+                                if kv.len() == 2 {
+                                    Some((kv[0].to_string(), kv[1].to_string()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                    }
+                    self.state = State::Headers;
                 }
-
-                if parts.len() != 3 {
-                    return Err("Invalid method + path + version request");
-                }
-                self.request.method = HttpMethod::from_str(parts[0]);
-                let path_parts: Vec<&str> = parts[1].split('?').collect();
-                self.request.path = path_parts[0].to_string();
-
-                if path_parts.len() > 1 {
-                    self.request.args = path_parts[1]
-                        .split('&')
-                        .filter_map(|pair| {
-                            let kv: Vec<&str> = pair.split('=').collect();
-                            if kv.len() == 2 {
-                                Some((kv[0].to_string(), kv[1].to_string()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                }
-            } else if !line_str.is_empty() {
-                // Header line
-                if let Some((key, value)) = line_str.split_once(":") {
-                    //Check the number of headers, if the actual headers exceed that number
-                    //drop the connection
-                    if self.request.headers.len() > MAX_HEADER_COUNT {
+                State::Headers => {
+                    let line = get_line(&mut self.buffer);
+                    if line.is_none() {
+                        return Ok(());
+                    }
+                    let line = line.unwrap();
+                    if line.is_empty() {
+                        self.state = if self.body_size == 0 {
+                            State::Finish
+                        } else {
+                            State::Body
+                        };
+                        continue;
+                    }
+                    if self.request.headers.len() > MAX_HEADER_COUNT || line.len() > MAX_HEADER_SIZE
+                    {
                         return Err("Header number exceed allowed");
                     }
 
+                    let (key, value) = line.split_once(':').ok_or("Invalid Header")?;
                     let key = key.trim();
                     let value = value.trim();
-
                     if key.to_lowercase() == "content-length" {
-                        if self.request.headers.get("content-length").is_some()
-                            || self
-                                .request
-                                .headers
-                                .get("transfer-encoding")
-                                .map(|te| te == "chunked")
-                                .unwrap_or(false)
-                        {
-                            return Err("Duplicated content-length");
-                        }
-                        self.body_size = value.parse().unwrap_or(0);
+                        self.body_size = value
+                            .parse::<usize>()
+                            .map_err(|_| "invalid content-length")?;
                     }
-                    self.request.headers.insert(&key, value);
+                    self.request.headers.insert(key, value);
                 }
-            } else {
-                // Empty line = end of headers
-                self.header_done = true;
-                self.read_body();
-                return Ok(());
+                State::Body => {
+                    self.request
+                        .body
+                        .extend_from_slice(&mut self.buffer.as_slice());
+                    self.buffer.clear();
+                    if self.request.body.len() >= self.body_size {
+                        self.state = State::Finish;
+                    }
+                    return Ok(());
+                }
+                State::Finish => return Ok(()),
             }
         }
+
+        if self.state == State::Body {}
+
         Ok(())
     }
+}
+
+fn get_line(buffer: &mut Vec<u8>) -> Option<String> {
+    if let Some(pos) = buffer.windows(2).position(|w| w == b"\r\n") {
+        let line = buffer.drain(..pos).collect::<Vec<u8>>();
+        buffer.drain(..2); // remove CRLF
+        return match str::from_utf8(line.as_slice()) {
+            Ok(v) => Some(v.to_string()),
+            Err(_e) => None,
+        };
+    }
+    None
 }
 
 #[cfg(test)]

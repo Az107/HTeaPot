@@ -120,8 +120,7 @@ impl HttpRequest {
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    println!("Read timeout");
-                    break;
+                    return Err("Connection timeout");
                 }
                 Err(_e) => return Err("Error reading"),
             }

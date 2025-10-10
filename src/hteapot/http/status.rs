@@ -11,7 +11,7 @@
 ///
 /// Use [`HttpStatus::from_u16`] to convert from raw codes,
 /// and [`HttpStatus::to_string`] to get the standard reason phrase.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum HttpStatus {
     // 2xx Success
     OK = 200,

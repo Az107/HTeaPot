@@ -146,8 +146,6 @@ impl HttpResponse {
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
         response.append(&mut self.content);
-        response.push(0x0D); // Carriage Return
-        response.push(0x0A); // Line Feed
         response
     }
 }
