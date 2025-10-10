@@ -117,7 +117,7 @@ fn main() {
     }
 
     // Determine if the server should proxy all requests
-    let proxy_only = config.proxy_rules.get("/").is_some();
+    config.proxy_only = config.proxy_rules.get("/").is_some();
 
     let min_log = if cfg!(debug_assertions) {
         LogLevel::DEBUG
@@ -163,7 +163,7 @@ fn main() {
     }
 
     // If proxy-only mode is enabled, issue a warning that local paths won't be used
-    if proxy_only {
+    if config.proxy_only {
         logger
             .warn("WARNING: All requests are proxied to /. Local paths won't be used.".to_string());
     }

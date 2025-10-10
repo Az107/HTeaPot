@@ -3,6 +3,9 @@
 // This module provides basic HTTP client functionality. It defines
 // methods to compose and send HTTP requests and parse the resulting
 // responses using a `TcpStream`.
+mod parser;
+
+use parser::HttpResponseBuilder;
 
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -106,16 +109,13 @@ impl HttpRequest {
         let _ = stream.flush();
         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
 
-        let mut raw: Vec<u8> = Vec::new();
         let mut buffer = [0u8; 4096];
-
+        let mut builder = HttpResponseBuilder::new();
         loop {
             match stream.read(&mut buffer) {
-                Ok(0) => break, // EOF
                 Ok(n) => {
-                    raw.extend_from_slice(&buffer[..n]);
-                    if n < 4096 {
-                        //TODO: write proper response parser
+                    let result = builder.append(&buffer[..n])?;
+                    if result {
                         break;
                     }
                 }
@@ -127,7 +127,7 @@ impl HttpRequest {
             }
         }
 
-        Ok(Box::new(HttpResponse::new_raw(raw)))
+        Ok(Box::new(builder.get().unwrap()))
     }
 }
 

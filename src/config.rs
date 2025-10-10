@@ -161,6 +161,7 @@ pub struct Config {
     pub log_file: Option<String>,
     pub index: String, // Index file to serve by default
     // pub error: String, // Error file to serve when a file is not found
+    pub proxy_only: bool,
     pub proxy_rules: HashMap<String, String>,
 }
 
@@ -188,6 +189,7 @@ impl Config {
             threads: 1,
             cache: false,
             cache_ttl: 0,
+            proxy_only: false,
             proxy_rules: HashMap::new(),
         }
     }
@@ -217,6 +219,7 @@ impl Config {
             threads: 1,
             cache: false,
             cache_ttl: 0,
+            proxy_only: false,
             proxy_rules: HashMap::new(),
         }
     }
@@ -278,6 +281,7 @@ impl Config {
             index: map.get2("index").unwrap_or("index.html".to_string()),
             log_file: map.get2("log_file"),
             //error: map.get2("error").unwrap_or("error.html".to_string()),
+            proxy_only: false,
             proxy_rules,
         }
     }
@@ -294,6 +298,7 @@ impl Config {
             threads: 2,
             log_file: None,
             index: "index.html".to_string(),
+            proxy_only: true,
             proxy_rules,
         }
     }

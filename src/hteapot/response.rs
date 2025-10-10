@@ -106,6 +106,16 @@ impl HttpResponse {
         })
     }
 
+    pub fn new_with_base(base: BaseResponse, content: Vec<u8>) -> Self {
+        HttpResponse {
+            base: base,
+            content: content.to_owned(),
+            raw: None,
+            is_raw: false,
+            index: 0,
+        }
+    }
+
     /// Creates a raw response from raw bytes (used for proxy responses).
     pub fn new_raw(raw: Vec<u8>) -> Self {
         HttpResponse {
