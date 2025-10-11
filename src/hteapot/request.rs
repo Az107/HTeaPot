@@ -153,10 +153,7 @@ impl HttpRequestBuilder {
     /// Reads bytes into the request body based on `Content-Length`.
     fn read_body_len(&mut self) -> Option<()> {
         let body_left = self.body_size.saturating_sub(self.request.body.len());
-        let to_take = min(body_left, self.buffer.len());
-        let to_append = self.buffer.drain(..to_take);
-        let to_append = to_append.as_slice();
-        self.request.body.extend_from_slice(to_append);
+
         let body_left = self.body_size.saturating_sub(self.request.body.len());
 
         if body_left > 0 {
@@ -185,7 +182,6 @@ impl HttpRequestBuilder {
     ///
     /// This function may return an error if the header is too large or malformed.
     pub fn append(&mut self, chunk: Vec<u8>) -> Result<(), &'static str> {
-        let chunk_size = chunk.len();
         self.buffer.extend(chunk);
 
         while !self.buffer.is_empty() {
@@ -193,6 +189,9 @@ impl HttpRequestBuilder {
                 State::Init => {
                     let line = get_line(&mut self.buffer);
                     if line.is_none() {
+                        if self.buffer.len() >= MAX_HEADER_SIZE {
+                            return Err("Entity Too Large");
+                        }
                         return Ok(());
                     }
                     let line = line.unwrap();
@@ -241,6 +240,12 @@ impl HttpRequestBuilder {
                     let key = key.trim();
                     let value = value.trim();
                     if key.to_lowercase() == "content-length" {
+                        if self.request.headers.get("content-length").is_some()
+                            || self.request.headers.get("Transfer-Encoding")
+                                == Some(&"chunked".to_string())
+                        {
+                            continue;
+                        }
                         self.body_size = value
                             .parse::<usize>()
                             .map_err(|_| "invalid content-length")?;
@@ -248,14 +253,36 @@ impl HttpRequestBuilder {
                     self.request.headers.insert(key, value);
                 }
                 State::Body => {
-                    self.request
-                        .body
-                        .extend_from_slice(&mut self.buffer.as_slice());
-                    self.buffer.clear();
-                    if self.request.body.len() >= self.body_size {
-                        self.state = State::Finish;
+                    let body_left = self.body_size - self.request.body.len();
+                    if body_left > 0 {
+                        let to_take = min(body_left, self.buffer.len());
+                        let to_append = self.buffer.drain(..to_take);
+                        let to_append = to_append.as_slice();
+                        self.request.body.extend_from_slice(to_append);
                     }
-                    return Ok(());
+                    if self.request.headers.get("Transfer-Encoding") == Some(&"chunked".to_string())
+                    {
+                        let empty = get_line(&mut self.buffer);
+                        if empty.is_none() {
+                            return Ok(());
+                        }
+                        let size = get_line(&mut self.buffer);
+                        if size.is_none() {
+                            return Ok(());
+                        }
+                        let size = size.unwrap();
+                        let size = size.strip_prefix("0x").unwrap_or(&size);
+                        let size =
+                            i64::from_str_radix(size, 16).map_err(|_| "Invalud chunk size")?;
+                        if size == 0 {
+                            self.state = State::Finish;
+                            return Ok(());
+                        }
+                        self.body_size += size as usize;
+                    } else {
+                        self.state = State::Finish;
+                        return Ok(());
+                    }
                 }
                 State::Finish => return Ok(()),
             }
