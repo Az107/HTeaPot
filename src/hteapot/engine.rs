@@ -229,7 +229,7 @@ impl Hteapot {
 
         match status.status {
             Status::Read => {
-                if !status.request.done {
+                while !status.request.done() {
                     let mut buffer = [0; BUFFER_SIZE];
                     match socket_data.stream.read(&mut buffer) {
                         Err(e) => match e.kind() {

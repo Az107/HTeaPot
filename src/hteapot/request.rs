@@ -114,7 +114,6 @@ pub struct HttpRequestBuilder {
     buffer: Vec<u8>,
     state: State,
     body_size: usize,
-    pub done: bool,
 }
 
 #[derive(PartialEq)]
@@ -140,7 +139,6 @@ impl HttpRequestBuilder {
             state: State::Init,
             body_size: 0,
             buffer: Vec::new(),
-            done: false,
         };
     }
 
@@ -164,7 +162,6 @@ impl HttpRequestBuilder {
         if body_left > 0 {
             return None;
         } else {
-            self.done = true;
             return Some(());
         }
     }
@@ -178,6 +175,10 @@ impl HttpRequestBuilder {
     /// Main entry point for reading the request body.
     fn read_body(&mut self) -> Option<()> {
         return self.read_body_len();
+    }
+
+    pub fn done(&self) -> bool {
+        self.state == State::Finish
     }
 
     /// Feeds a chunk of bytes into the builder.
@@ -259,8 +260,6 @@ impl HttpRequestBuilder {
                 State::Finish => return Ok(()),
             }
         }
-
-        if self.state == State::Body {}
 
         Ok(())
     }
