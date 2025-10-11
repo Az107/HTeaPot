@@ -169,8 +169,10 @@ impl Hteapot {
                     // }
 
                     streams_to_handle.retain_mut(|s| {
-                        Hteapot::handle_client(s, &action_clone);
-                        s.status.is_some()
+                        if s.status.is_none() {
+                            return false;
+                        }
+                        Hteapot::handle_client(s, &action_clone).is_some()
                     });
                 }
             });
