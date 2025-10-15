@@ -114,6 +114,7 @@ pub struct HttpRequestBuilder {
     buffer: Vec<u8>,
     state: State,
     body_size: usize,
+    chunked: bool,
 }
 
 #[derive(PartialEq)]
@@ -136,6 +137,7 @@ impl HttpRequestBuilder {
                 body: Vec::new(),
                 stream: None,
             },
+            chunked: false,
             state: State::Init,
             body_size: 0,
             buffer: Vec::new(),
@@ -224,7 +226,7 @@ impl HttpRequestBuilder {
                     }
                     let line = line.unwrap();
                     if line.is_empty() {
-                        self.state = if self.body_size == 0 {
+                        self.state = if self.body_size == 0 && !self.chunked {
                             State::Finish
                         } else {
                             State::Body
@@ -250,6 +252,14 @@ impl HttpRequestBuilder {
                             .parse::<usize>()
                             .map_err(|_| "invalid content-length")?;
                     }
+                    if key.to_lowercase() == "transfer-encoding"
+                        && value.to_lowercase() == "chunked"
+                    {
+                        if self.request.headers.get("content-length").is_some() {
+                            continue;
+                        }
+                        self.chunked = true;
+                    }
                     self.request.headers.insert(key, value);
                 }
                 State::Body => {
@@ -260,11 +270,12 @@ impl HttpRequestBuilder {
                         let to_append = to_append.as_slice();
                         self.request.body.extend_from_slice(to_append);
                     }
-                    if self.request.headers.get("Transfer-Encoding") == Some(&"chunked".to_string())
-                    {
-                        let empty = get_line(&mut self.buffer);
-                        if empty.is_none() {
-                            return Ok(());
+                    if self.chunked {
+                        if self.body_size != 0 {
+                            let empty = get_line(&mut self.buffer);
+                            if empty.is_none() {
+                                return Ok(());
+                            }
                         }
                         let size = get_line(&mut self.buffer);
                         if size.is_none() {
