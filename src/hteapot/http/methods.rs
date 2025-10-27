@@ -32,7 +32,8 @@ impl HttpMethod {
     /// assert_eq!(custom, HttpMethod::Other("CUSTOM".into()));
     /// ```
     pub fn from_str(method: &str) -> HttpMethod {
-        match method {
+        let method = method.to_uppercase();
+        match method.as_str() {
             "GET" => HttpMethod::GET,
             "POST" => HttpMethod::POST,
             "PUT" => HttpMethod::PUT,

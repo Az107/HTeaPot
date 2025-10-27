@@ -7,26 +7,33 @@
 //!
 //! All response types implement the [`HttpResponseCommon`] trait.
 
+use super::HttpHeaders;
+
 use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
+use std::io::Write;
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SendError, Sender, TryRecvError};
-use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
+use std::vec;
+use std::{io, thread};
 
 /// Basic HTTP status line + headers.
+#[derive(Clone)]
 pub struct BaseResponse {
     pub status: HttpStatus,
-    pub headers: HashMap<String, String>,
+    pub headers: HttpHeaders,
 }
 
 impl BaseResponse {
     /// Converts the status + headers into a properly formatted HTTP header block.
     pub fn to_bytes(&mut self) -> Vec<u8> {
         let mut headers_text = String::new();
-        for (key, value) in self.headers.iter() {
+        for (key, value) in &self.headers {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
 
@@ -44,6 +51,7 @@ impl BaseResponse {
 }
 
 /// Represents a full HTTP response (headers + body).
+#[derive(Clone)]
 pub struct HttpResponse {
     base: BaseResponse,
     pub content: Vec<u8>,
@@ -62,6 +70,10 @@ pub trait HttpResponseCommon {
 
     /// Advances and returns the next chunk of the response body.
     fn peek(&mut self) -> Result<Vec<u8>, IterError>;
+
+    fn set_stream(&mut self, _stream: &TcpStream) {
+        ()
+    }
 }
 
 /// Error returned during response iteration.
@@ -78,16 +90,13 @@ impl HttpResponse {
     pub fn new<B: AsRef<[u8]>>(
         status: HttpStatus,
         content: B,
-        headers: Option<HashMap<String, String>>,
+        headers: Option<HttpHeaders>,
     ) -> Box<Self> {
-        let mut headers = headers.unwrap_or(HashMap::new());
+        let mut headers = headers.unwrap_or(HttpHeaders::new());
         let content = content.as_ref();
 
-        headers.insert("Content-Length".to_string(), content.len().to_string());
-        headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
+        headers.insert("Content-Length", &content.len().to_string());
+        headers.insert("Server", &format!("HTeaPot/{}", VERSION).to_string());
 
         Box::new(HttpResponse {
             base: BaseResponse { status, headers },
@@ -103,7 +112,7 @@ impl HttpResponse {
         HttpResponse {
             base: BaseResponse {
                 status: HttpStatus::IAmATeapot,
-                headers: HashMap::new(),
+                headers: HttpHeaders::new(),
             },
             content: vec![],
             raw: Some(raw),
@@ -124,7 +133,7 @@ impl HttpResponse {
         }
 
         let mut headers_text = String::new();
-        for (key, value) in self.base.headers.iter() {
+        for (key, value) in self.base.headers.clone() {
             headers_text.push_str(&format!("{}: {}\r\n", key, value));
         }
 
@@ -138,8 +147,6 @@ impl HttpResponse {
         let mut response = Vec::new();
         response.extend_from_slice(response_header.as_bytes());
         response.append(&mut self.content);
-        response.push(0x0D); // Carriage Return
-        response.push(0x0A); // Line Feed
         response
     }
 }
@@ -150,9 +157,9 @@ impl HttpResponseCommon for HttpResponse {
     }
 
     fn next(&mut self) -> Result<Vec<u8>, IterError> {
-        let byte_chunk = self.peek()?;
+        //let byte_chunk = self.peek()?;
         self.index += 1;
-        return Ok(byte_chunk);
+        return Ok(Vec::new());
     }
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {
@@ -229,15 +236,12 @@ impl StreamedResponse {
 
         let mut base = BaseResponse {
             status: HttpStatus::OK,
-            headers: HashMap::new(),
+            headers: HttpHeaders::new(),
         };
 
+        base.headers.insert("Transfer-Encoding", "chunked");
         base.headers
-            .insert("Transfer-Encoding".to_string(), "chunked".to_string());
-        base.headers.insert(
-            "Server".to_string(),
-            format!("HTeaPot/{}", VERSION).to_string(),
-        );
+            .insert("Server", &format!("HTeaPot/{}", VERSION));
 
         let _ = tx.send(base.to_bytes());
         let has_end = Arc::new(AtomicBool::new(false));
@@ -291,5 +295,85 @@ impl HttpResponseCommon for StreamedResponse {
         } else {
             self.queue.pop_front().ok_or(IterError::WouldBlock)
         }
+    }
+}
+
+pub struct TunnelResponse {
+    base: BaseResponse,
+    addr: String,
+    has_end: Arc<AtomicBool>,
+    stream_in: Option<TcpStream>, // In as Stream from the client *in* this server
+    stream_out: Option<TcpStream>, // Out as Stream from the server *to* this server
+}
+
+impl TunnelResponse {
+    pub fn new(addr: &str) -> Box<Self> {
+        return Box::new(TunnelResponse {
+            base: BaseResponse {
+                status: HttpStatus::OK,
+                headers: HttpHeaders::new(),
+                // headers: headers! {"connection" => "keep-alive"}.unwrap(),
+            },
+            addr: addr.to_string(),
+            has_end: Arc::new(AtomicBool::new(false)),
+            stream_in: None,
+            stream_out: None,
+        });
+    }
+}
+
+impl HttpResponseCommon for TunnelResponse {
+    fn base(&mut self) -> &mut BaseResponse {
+        &mut self.base
+    }
+
+    fn next(&mut self) -> Result<Vec<u8>, IterError> {
+        self.peek()
+    }
+
+    fn peek(&mut self) -> Result<Vec<u8>, IterError> {
+        if self.has_end.load(Ordering::SeqCst) {
+            if let Some(sock_in) = &self.stream_in {
+                let _ = sock_in.shutdown(std::net::Shutdown::Both);
+            }
+            if let Some(sock_out) = &self.stream_out {
+                let _ = sock_out.shutdown(std::net::Shutdown::Both);
+            }
+            return Err(IterError::Finished);
+        }
+        let mut buf = [0; 1];
+        let _ = self.stream_in.as_ref().unwrap().peek(&mut buf);
+
+        return Err(IterError::WouldBlock);
+    }
+
+    fn set_stream(&mut self, stream: &TcpStream) {
+        let mut client_stream = stream.try_clone().expect("clone failed...");
+        self.stream_in = Some(client_stream.try_clone().expect("clone failed..."));
+        let server_stream = TcpStream::connect(&self.addr);
+        if server_stream.is_err() {
+            println!("Error connecting");
+            return;
+        }
+        let mut server_stream = server_stream.unwrap();
+        self.stream_out = Some(server_stream.try_clone().expect("clone failed..."));
+        let _ = client_stream.set_nonblocking(false);
+        let _ = client_stream.set_nodelay(true);
+        let _ = client_stream.set_read_timeout(Some(Duration::from_millis(500)));
+        let _ = client_stream.set_write_timeout(Some(Duration::from_millis(500)));
+        let _ = client_stream.write_all(&self.base.to_bytes());
+        let mut server_stream_1 = server_stream.try_clone().expect("Error cloning");
+        let mut client_stream_1 = client_stream.try_clone().expect("clone failed...");
+        let has_ended = self.has_end.clone();
+        thread::spawn(move || {
+            let _ = io::copy(&mut client_stream_1, &mut server_stream_1);
+            has_ended.store(true, Ordering::SeqCst);
+        });
+
+        let has_ended = self.has_end.clone();
+        thread::spawn(move || {
+            let _ = io::copy(&mut server_stream, &mut client_stream);
+            has_ended.store(true, Ordering::SeqCst);
+        });
     }
 }

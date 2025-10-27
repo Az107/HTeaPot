@@ -1,6 +1,6 @@
 [package]
 name = "hteapot"
-version = "0.6.2"
+version = "0.6.5"
 edition = "2024"
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 description = "HTeaPot is a lightweight HTTP server library designed to be easy to use and extend."
@@ -25,6 +25,7 @@ path = "src/hteapot/mod.rs"
 name = "hteapot"
 
 [dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2.172"
 
 

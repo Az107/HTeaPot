@@ -11,7 +11,7 @@
 ///
 /// Use [`HttpStatus::from_u16`] to convert from raw codes,
 /// and [`HttpStatus::to_string`] to get the standard reason phrase.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum HttpStatus {
     // 2xx Success
     OK = 200,
@@ -98,7 +98,7 @@ impl HttpStatus {
             305 => Ok(HttpStatus::UseProxy),
             307 => Ok(HttpStatus::TemporaryRedirect),
             308 => Ok(HttpStatus::PermanentRedirect),
-            
+
             400 => Ok(HttpStatus::BadRequest),
             401 => Ok(HttpStatus::Unauthorized),
             402 => Ok(HttpStatus::PaymentRequired),
@@ -127,7 +127,7 @@ impl HttpStatus {
             428 => Ok(HttpStatus::PreconditionRequired),
             429 => Ok(HttpStatus::TooManyRequests),
             431 => Ok(HttpStatus::RequestHeaderFieldsTooLarge),
-            
+
             500 => Ok(HttpStatus::InternalServerError),
             501 => Ok(HttpStatus::NotImplemented),
             502 => Ok(HttpStatus::BadGateway),

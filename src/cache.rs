@@ -1,10 +1,11 @@
 // Written by Alberto Ruiz, 2024-11-05
-// 
+//
 // Config module: handles application configuration setup and parsing.
 // This module defines structs and functions to load and validate
 // configuration settings from files, environment variables, or other sources.
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::time;
 use std::time::SystemTime;
 
@@ -24,14 +25,18 @@ use std::time::SystemTime;
 /// let data = cache.get("hello".into());
 /// assert!(data.is_some());
 /// ```
-pub struct Cache {
+pub struct Cache<K, V> {
     // TODO: consider make it generic
     // The internal store: (data, expiration timestamp)
-    data: HashMap<String, (Vec<u8>, u64)>,
+    data: HashMap<K, (V, u64)>,
     max_ttl: u64,
 }
 
-impl Cache {
+impl<K, V> Cache<K, V>
+where
+    K: Eq + Hash,
+    V: Clone,
+{
     /// Creates a new `Cache` with the specified TTL in seconds.
     pub fn new(max_ttl: u64) -> Self {
         Cache {
@@ -61,14 +66,14 @@ impl Cache {
     }
 
     /// Stores data in the cache with the given key and a TTL.
-    pub fn set(&mut self, key: String, data: Vec<u8>) {
+    pub fn set(&mut self, key: K, data: V) {
         self.data.insert(key, (data, self.get_ttl()));
     }
 
     /// Retrieves data from the cache if it exists and hasn't expired.
     ///
     /// Removes and returns `None` if the TTL has expired.
-    pub fn get(&mut self, key: String) -> Option<Vec<u8>> {
+    pub fn get(&mut self, key: &K) -> Option<V> {
         let r = self.data.get(&key);
         if r.is_some() {
             let (data, ttl) = r.unwrap();
