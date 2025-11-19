@@ -16,6 +16,10 @@
 //! Use [`Hteapot::listen`] to start a server with a request handler closure.
 //! ```
 
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+
 /// Submodules for HTTP functionality.
 pub mod brew; // HTTP client implementation
 mod engine;

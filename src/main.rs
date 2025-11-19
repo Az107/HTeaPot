@@ -34,6 +34,10 @@
 //! ```
 //!
 //! See the [`config`](crate::config) module for configuration options and structure.
+
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
 mod cache;
 mod config;
 mod handler;

@@ -24,7 +24,6 @@ use super::response::{EmptyHttpResponse, HttpResponseCommon, IterError};
 ///     "X-Custom" => "value"
 /// };
 /// ```
-
 pub struct Hteapot {
     port: u16,
     address: String,
@@ -131,7 +130,13 @@ impl Hteapot {
                 loop {
                     {
                         let (lock, cvar) = &*pool_clone;
-                        let mut pool = lock.lock().expect("Error locking pool");
+                        let mut pool = match lock.lock() {
+                            Ok(pool) => pool,
+                            Err(_) => {
+                                break;
+                            }
+                        };
+
                         if streams_to_handle.is_empty() {
                             // Store the returned guard back into pool
                             pool = cvar
@@ -139,10 +144,10 @@ impl Hteapot {
                                 .expect("Error waiting on cvar");
                         }
                         //TODO: move this to allow process the last request
-                        if let Some(signal) = &shutdown_signal_clone {
-                            if !signal.load(Ordering::SeqCst) {
-                                break; // Exit the server loop
-                            }
+                        if let Some(signal) = &shutdown_signal_clone
+                            && !signal.load(Ordering::SeqCst)
+                        {
+                            break; // Exit the server loop
                         }
 
                         while let Some(stream) = pool.pop_back() {
@@ -179,16 +184,16 @@ impl Hteapot {
         }
 
         loop {
-            if let Some(signal) = &shutdown_signal {
-                if !signal.load(Ordering::SeqCst) {
-                    let (lock, cvar) = &*pool;
-                    let _guard = lock.lock().unwrap();
-                    cvar.notify_all();
-                    for hook in shutdown_hooks.iter() {
-                        hook();
-                    }
-                    break;
+            if let Some(signal) = &shutdown_signal
+                && !signal.load(Ordering::SeqCst)
+            {
+                let (lock, cvar) = &*pool;
+                let _guard = lock.lock().unwrap();
+                cvar.notify_all();
+                for hook in shutdown_hooks.iter() {
+                    hook();
                 }
+                break;
             }
             let stream = match listener.accept() {
                 Ok((stream, _)) => stream,
@@ -248,9 +253,8 @@ impl Hteapot {
                             }
                             status.ttl = Instant::now();
                             let r = status.request.append(buffer[..m].to_vec());
-                            if r.is_err() {
+                            if let Some(error_msg) = r.err() {
                                 // Early return response if not valid request is sended
-                                let error_msg = r.err().unwrap();
                                 let response =
                                     HttpResponse::new(HttpStatus::BadRequest, error_msg, None)
                                         .to_bytes();

@@ -80,7 +80,7 @@ impl HttpRequest {
             addr.push_str(":80");
         }
 
-        let addr = addr.split("/").next().unwrap();
+        let addr = addr.split("/").next().ok_or("malformed address")?;
         // Resolve address
         let addr = if addr.starts_with("localhost") {
             addr.replace("localhost", "127.0.0.1").to_string()
