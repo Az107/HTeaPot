@@ -10,6 +10,7 @@
 use super::HttpHeaders;
 use super::HttpMethod;
 use std::hash::Hash;
+use std::net::SocketAddr;
 use std::{cmp::min, collections::HashMap, net::TcpStream, str};
 
 const MAX_HEADER_SIZE: usize = 1024 * 16;
@@ -25,6 +26,7 @@ pub struct HttpRequest {
     pub args: HashMap<String, String>,
     pub headers: HttpHeaders,
     pub body: Vec<u8>,
+    pub addr: SocketAddr,
     stream: Option<TcpStream>,
 }
 
@@ -60,6 +62,8 @@ impl HttpRequest {
             args: HashMap::new(),
             headers: HttpHeaders::new(),
             body: Vec::new(),
+            addr: SocketAddr::from(([0, 0, 0, 0], 0)),
+
             stream: None,
         };
     }
@@ -71,6 +75,8 @@ impl HttpRequest {
             path: String::new(),
             args: HashMap::new(),
             headers: HttpHeaders::new(),
+            addr: SocketAddr::from(([0, 0, 0, 0], 0)),
+
             body: Vec::new(),
             stream: None,
         }
@@ -83,6 +89,7 @@ impl HttpRequest {
             path: self.path.clone(),
             args: self.args.clone(),
             headers: self.headers.clone(),
+            addr: self.addr.clone(),
             body: self.body.clone(),
             stream: None,
         };
@@ -135,6 +142,25 @@ impl HttpRequestBuilder {
                 args: HashMap::new(),
                 headers: HttpHeaders::new(),
                 body: Vec::new(),
+                addr: SocketAddr::from(([0, 0, 0, 0], 0)),
+                stream: None,
+            },
+            chunked: false,
+            state: State::Init,
+            body_size: 0,
+            buffer: Vec::new(),
+        };
+    }
+
+    pub fn new_with_addr(addr: SocketAddr) -> Self {
+        return HttpRequestBuilder {
+            request: HttpRequest {
+                method: HttpMethod::GET,
+                path: String::new(),
+                args: HashMap::new(),
+                headers: HttpHeaders::new(),
+                body: Vec::new(),
+                addr,
                 stream: None,
             },
             chunked: false,
@@ -150,30 +176,6 @@ impl HttpRequestBuilder {
             State::Finish => Some(self.request.clone()),
             _ => None,
         }
-    }
-
-    /// Reads bytes into the request body based on `Content-Length`.
-    fn read_body_len(&mut self) -> Option<()> {
-        let body_left = self.body_size.saturating_sub(self.request.body.len());
-
-        let body_left = self.body_size.saturating_sub(self.request.body.len());
-
-        if body_left > 0 {
-            return None;
-        } else {
-            return Some(());
-        }
-    }
-
-    /// Placeholder for future support of chunked body parsing.
-    fn _read_body_chunk(&mut self) -> Option<()> {
-        //TODO: this will support chunked body in the future
-        todo!()
-    }
-
-    /// Main entry point for reading the request body.
-    fn read_body(&mut self) -> Option<()> {
-        return self.read_body_len();
     }
 
     pub fn done(&self) -> bool {

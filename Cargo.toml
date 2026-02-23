@@ -1,6 +1,6 @@
 [package]
 name = "hteapot"
-version = "0.6.5"
+version = "0.6.6"
 edition = "2024"
 authors = ["Alb Ruiz G. <me@albruiz.dev>"]
 description = "HTeaPot is a lightweight HTTP server library designed to be easy to use and extend."

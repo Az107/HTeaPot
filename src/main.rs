@@ -218,6 +218,7 @@ fn main() {
 
         let response = handlers.get_handler(&ctx);
         if response.is_none() {
+            logger.error("No handler found for request".to_string());
             return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
         }
         let response = response.unwrap().run(&mut ctx);

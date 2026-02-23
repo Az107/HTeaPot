@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -29,6 +29,7 @@ pub struct Hteapot {
     port: u16,
     address: String,
     threads: u16,
+    banned_ips: Vec<SocketAddr>,
     shutdown_signal: Option<Arc<AtomicBool>>,
     shutdown_hooks: Vec<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
@@ -52,6 +53,7 @@ struct SocketStatus {
 /// Wraps a TCP stream and its associated state.
 struct SocketData {
     stream: TcpStream,
+    _addr: SocketAddr,
     status: Option<SocketStatus>,
 }
 
@@ -62,6 +64,10 @@ impl Hteapot {
 
     pub fn get_shutdown_signal(&self) -> Option<Arc<AtomicBool>> {
         self.shutdown_signal.clone()
+    }
+
+    pub fn add_banned_ip(&mut self, ip: SocketAddr) {
+        self.banned_ips.push(ip);
     }
 
     pub fn add_shutdown_hook<F>(&mut self, hook: F)
@@ -81,6 +87,7 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: 1,
+            banned_ips: Vec::new(),
             shutdown_signal: None,
             shutdown_hooks: Vec::new(),
         }
@@ -91,6 +98,7 @@ impl Hteapot {
             port,
             address: address.to_string(),
             threads: if threads == 0 { 1 } else { threads },
+            banned_ips: Vec::new(),
             shutdown_signal: None,
             shutdown_hooks: Vec::new(),
         }
@@ -110,7 +118,7 @@ impl Hteapot {
             }
         };
 
-        let pool: Arc<(Mutex<VecDeque<TcpStream>>, Condvar)> =
+        let pool: Arc<(Mutex<VecDeque<(TcpStream, SocketAddr)>>, Condvar)> =
             Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
         let priority_list: Arc<Mutex<Vec<usize>>> =
             Arc::new(Mutex::new(vec![0; self.threads as usize]));
@@ -120,10 +128,10 @@ impl Hteapot {
         let shutdown_signal = self.shutdown_signal.clone();
         let shutdown_hooks = Arc::new(self.shutdown_hooks.clone());
 
-        for thread_index in 0..self.threads {
+        for _thread_index in 0..self.threads {
             let pool_clone = pool.clone();
             let action_clone = arc_action.clone();
-            let priority_list_clone = priority_list.clone();
+            let _priority_list_clone = priority_list.clone();
             let shutdown_signal_clone = shutdown_signal.clone();
 
             thread::spawn(move || {
@@ -132,28 +140,33 @@ impl Hteapot {
                     {
                         let (lock, cvar) = &*pool_clone;
                         let mut pool = lock.lock().expect("Error locking pool");
+
                         if streams_to_handle.is_empty() {
                             // Store the returned guard back into pool
-                            pool = cvar
-                                .wait_while(pool, |pool| pool.is_empty())
-                                .expect("Error waiting on cvar");
-                        }
-                        //TODO: move this to allow process the last request
-                        if let Some(signal) = &shutdown_signal_clone {
-                            if !signal.load(Ordering::SeqCst) {
-                                break; // Exit the server loop
-                            }
+                            pool = if let Some(signal) = &shutdown_signal_clone {
+                                if !signal.load(Ordering::SeqCst) {
+                                    break;
+                                }
+                                cvar.wait_while(pool, |pool| {
+                                    pool.is_empty() && signal.load(Ordering::SeqCst)
+                                })
+                                .expect("Error waiting on cvar")
+                            } else {
+                                cvar.wait_while(pool, |pool| pool.is_empty())
+                                    .expect("Error waiting on cvar")
+                            };
                         }
 
-                        while let Some(stream) = pool.pop_back() {
+                        while let Some((stream, addr)) = pool.pop_back() {
                             let socket_status = SocketStatus {
                                 ttl: Instant::now(),
                                 status: Status::Read,
                                 response: Box::new(EmptyHttpResponse {}),
-                                request: HttpRequestBuilder::new(),
+                                request: HttpRequestBuilder::new_with_addr(addr),
                                 index_writed: 0,
                             };
                             let socket_data = SocketData {
+                                _addr: addr,
                                 stream,
                                 status: Some(socket_status),
                             };
@@ -190,10 +203,15 @@ impl Hteapot {
                     break;
                 }
             }
-            let stream = match listener.accept() {
-                Ok((stream, _)) => stream,
+
+            let (stream, addr) = match listener.accept() {
+                Ok((stream, addr)) => (stream, addr),
                 Err(_) => continue,
             };
+            if self.banned_ips.contains(&addr) {
+                let _ = stream.shutdown(Shutdown::Both);
+                continue;
+            }
 
             if stream.set_nonblocking(true).is_err() {
                 eprintln!("Error setting non-blocking mode on stream");
@@ -209,7 +227,7 @@ impl Hteapot {
                 let mut pool = lock.lock().expect("Error locking pool");
 
                 // Add the connection to the pool for the least-loaded thread
-                pool.push_front(stream);
+                pool.push_front((stream, addr));
                 cvar.notify_one();
             }
         }
