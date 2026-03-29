@@ -13,6 +13,7 @@ use super::HttpStatus;
 use super::{BUFFER_SIZE, VERSION};
 use std::collections::VecDeque;
 use std::io::Write;
+use std::net::Shutdown;
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +22,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use std::vec;
 use std::{io, thread};
+
+const MAX_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Basic HTTP status line + headers.
 #[derive(Clone)]
@@ -301,7 +304,7 @@ impl HttpResponseCommon for StreamedResponse {
 pub struct TunnelResponse {
     base: BaseResponse,
     addr: String,
-    has_end: Arc<AtomicBool>,
+    has_end: Arc<(AtomicBool, AtomicBool)>,
     stream_in: Option<TcpStream>, // In as Stream from the client *in* this server
     stream_out: Option<TcpStream>, // Out as Stream from the server *to* this server
 }
@@ -315,7 +318,7 @@ impl TunnelResponse {
                 // headers: headers! {"connection" => "keep-alive"}.unwrap(),
             },
             addr: addr.to_string(),
-            has_end: Arc::new(AtomicBool::new(false)),
+            has_end: Arc::new((AtomicBool::new(false), AtomicBool::new(false))),
             stream_in: None,
             stream_out: None,
         });
@@ -332,17 +335,17 @@ impl HttpResponseCommon for TunnelResponse {
     }
 
     fn peek(&mut self) -> Result<Vec<u8>, IterError> {
-        if self.has_end.load(Ordering::SeqCst) {
+        if self.has_end.0.load(Ordering::SeqCst) && self.has_end.1.load(Ordering::SeqCst) {
             if let Some(sock_in) = &self.stream_in {
                 let _ = sock_in.shutdown(std::net::Shutdown::Both);
             }
             if let Some(sock_out) = &self.stream_out {
                 let _ = sock_out.shutdown(std::net::Shutdown::Both);
             }
+            println!("Closed on ended");
+
             return Err(IterError::Finished);
         }
-        let mut buf = [0; 1];
-        let _ = self.stream_in.as_ref().unwrap().peek(&mut buf);
 
         return Err(IterError::WouldBlock);
     }
@@ -357,23 +360,56 @@ impl HttpResponseCommon for TunnelResponse {
         }
         let mut server_stream = server_stream.unwrap();
         self.stream_out = Some(server_stream.try_clone().expect("clone failed..."));
-        let _ = client_stream.set_nonblocking(false);
-        let _ = client_stream.set_nodelay(true);
-        let _ = client_stream.set_read_timeout(Some(Duration::from_millis(500)));
-        let _ = client_stream.set_write_timeout(Some(Duration::from_millis(500)));
+        // let _ = client_stream
+        //     .set_nonblocking(false)
+        //     .expect("Error setting client notblocking");
+        let _ = client_stream.set_nodelay(false);
+        let _ = client_stream.set_read_timeout(Some(MAX_TIMEOUT));
         let _ = client_stream.write_all(&self.base.to_bytes());
         let mut server_stream_1 = server_stream.try_clone().expect("Error cloning");
         let mut client_stream_1 = client_stream.try_clone().expect("clone failed...");
+        // let _ = server_stream_1.set_nonblocking(false);
+
         let has_ended = self.has_end.clone();
         thread::spawn(move || {
-            let _ = io::copy(&mut client_stream_1, &mut server_stream_1);
-            has_ended.store(true, Ordering::SeqCst);
+            // Client -> Server
+
+            loop {
+                let r = io::copy(&mut client_stream_1, &mut server_stream_1);
+
+                match r {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            continue;
+                        }
+                        println!("Client -> Server: {:?}", e);
+                        break;
+                    }
+                }
+            }
+            println!("Client has ended");
+            server_stream_1.shutdown(Shutdown::Write).ok();
+            has_ended.0.store(true, Ordering::SeqCst);
         });
 
         let has_ended = self.has_end.clone();
         thread::spawn(move || {
-            let _ = io::copy(&mut server_stream, &mut client_stream);
-            has_ended.store(true, Ordering::SeqCst);
+            // Server -> Client
+            loop {
+                let r = io::copy(&mut server_stream, &mut client_stream);
+                println!("Server -> Client: {:?}", r);
+                let c2s_has_ended = has_ended.0.load(Ordering::SeqCst);
+                let server_has_error = r.is_err();
+                let server_has_ended = r.is_ok() && r.unwrap() == 0;
+                if c2s_has_ended || server_has_ended || server_has_error {
+                    break;
+                }
+            }
+            println!("Server has ended");
+            client_stream.shutdown(Shutdown::Write).ok();
+            has_ended.1.store(true, Ordering::SeqCst);
         });
     }
 }

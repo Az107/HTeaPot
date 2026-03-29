@@ -323,7 +323,7 @@ impl Hteapot {
                             status.ttl = Instant::now();
                             return Some(());
                         }
-                        Err(_) => break,
+                        Err(IterError::Finished) => break,
                     }
                 }
                 status.status = Status::Finish;
