@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io::Write;
 use std::sync::Arc;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{SyncSender, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -114,15 +114,14 @@ impl SimpleTime {
 
 /// Internal message structure containing log metadata.
 struct LogMessage {
-    timestamp: String,
     level: LogLevel,
-    component: String,
+    component: Arc<String>,
     content: String,
 }
 
 /// Core logger implementation running in a background thread.
 struct LoggerCore {
-    tx: Sender<LogMessage>,
+    tx: SyncSender<LogMessage>,
     _thread: JoinHandle<()>,
 }
 
@@ -143,41 +142,37 @@ impl Logger {
         min_level: LogLevel,
         component: &str,
     ) -> Logger {
-        let (tx, rx) = channel::<LogMessage>();
+        let (tx, rx) = sync_channel::<LogMessage>(4096);
         let thread = thread::spawn(move || {
             let mut last_flush = Instant::now();
-            let mut buff = Vec::new();
-            let mut max_size = 100;
+            let mut buff = String::with_capacity(8196);
+            let mut max_size = 100usize;
             let timeout = Duration::from_secs(1);
 
             loop {
                 let msg = rx.recv_timeout(timeout);
                 match msg {
                     Ok(msg) => {
-                        let formatted = format!(
+                        let ts = SimpleTime::get_current_timestamp();
+                        buff.push_str(&format!(
                             "{} [{}] [{}] {}\n",
-                            msg.timestamp, msg.level, msg.component, msg.content
-                        );
-                        buff.push(formatted);
+                            ts, msg.level, msg.component, msg.content
+                        ));
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     Err(_) => break,
                 }
 
                 // Flush if timeout or buffer threshold reached
-                if last_flush.elapsed() >= timeout || buff.len() >= max_size {
+                if last_flush.elapsed() >= timeout || buff.len() >= max_size * 80 {
                     if !buff.is_empty() {
-                        if buff.len() >= max_size {
-                            max_size = (max_size * 10).min(1_000_000);
+                        max_size = if buff.len() >= max_size * 80 {
+                            (max_size * 10).min(1_000_000)
                         } else {
-                            max_size = (max_size / 10).max(100);
-                        }
-                        let wr = writer.write_all(buff.join("").as_bytes());
-                        if wr.is_err() {
-                            println!("Failed to write to log: {:?}", wr);
-                        }
+                            (max_size / 10).max(100)
+                        };
+                        let _ = writer.write_all(buff.as_bytes());
                         let _ = writer.flush();
-
                         buff.clear();
                     }
                     last_flush = Instant::now();
@@ -204,21 +199,22 @@ impl Logger {
         }
     }
 
+    #[inline]
+    pub fn enabled(&self, level:LogLevel) -> bool {
+       level >= self.min_level
+    }
+
     /// Sends a log message with the given level and content.
     pub fn log(&self, level: LogLevel, content: String) {
-        if level < self.min_level {
+        if !self.enabled(level) {
             return;
         }
 
-        let log_msg = LogMessage {
-            timestamp: SimpleTime::get_current_timestamp(),
+        let _ = self.core.tx.try_send(LogMessage {
             level,
-            component: (*self.component).clone(),
+            component: Arc::clone(&self.component),
             content,
-        };
-
-        // Send the log message to the channel
-        let _ = self.core.tx.send(log_msg);
+        });
     }
 
     /// Logs a DEBUG-level message.
@@ -261,6 +257,39 @@ impl Clone for Logger {
             min_level: self.min_level,
         }
     }
+}
+
+#[macro_export]
+macro_rules! log_debug {
+    ($l:expr, $($a:tt)*) => {
+        if $l.enabled($crate::logger::LogLevel::DEBUG) {
+            $l.log($crate::logger::LogLevel::DEBUG, format!($($a)*));
+        }
+    };
+}
+#[macro_export]
+macro_rules! log_info {
+    ($l:expr, $($a:tt)*) => {
+        if $l.enabled($crate::logger::LogLevel::INFO) {
+            $l.log($crate::logger::LogLevel::INFO, format!($($a)*));
+        }
+    };
+}
+#[macro_export]
+macro_rules! log_warn {
+    ($l:expr, $($a:tt)*) => {
+        if $l.enabled($crate::logger::LogLevel::WARN) {
+            $l.log($crate::logger::LogLevel::WARN, format!($($a)*));
+        }
+    };
+}
+#[macro_export]
+macro_rules! log_error {
+    ($l:expr, $($a:tt)*) => {
+        if $l.enabled($crate::logger::LogLevel::ERROR) {
+            $l.log($crate::logger::LogLevel::ERROR, format!($($a)*));
+        }
+    };
 }
 
 #[cfg(test)]
