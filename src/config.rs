@@ -159,6 +159,7 @@ pub struct Config {
     pub cache_ttl: u16,
     pub threads: u16,
     pub log_file: Option<String>,
+    pub log_level: Option<String>,
     pub index: String, // Index file to serve by default
     // pub error: String, // Error file to serve when a file is not found
     pub proxy_rules: HashMap<String, String>,
@@ -185,6 +186,7 @@ impl Config {
             index: "index.html".to_string(),
             log_file: None,
             //error: "error.html".to_string(),
+            log_level: None,
             threads: 1,
             cache: false,
             cache_ttl: 0,
@@ -213,7 +215,7 @@ impl Config {
             root: root_dir,
             index: file_name.to_string(),
             log_file: None,
-
+            log_level: None,
             threads: 1,
             cache: false,
             cache_ttl: 0,
@@ -278,6 +280,7 @@ impl Config {
             index: map.get2("index").unwrap_or("index.html".to_string()),
             log_file: map.get2("log_file"),
             //error: map.get2("error").unwrap_or("error.html".to_string()),
+            log_level: map.get2("log_level"),
             proxy_rules,
         }
     }
@@ -293,6 +296,7 @@ impl Config {
             cache_ttl: 0,
             threads: 2,
             log_file: None,
+            log_level: None,
             index: "index.html".to_string(),
             proxy_rules,
         }

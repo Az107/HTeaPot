@@ -119,10 +119,13 @@ fn main() {
     // Determine if the server should proxy all requests
     let proxy_only = config.proxy_rules.get("/").is_some();
 
-    let min_log = if cfg!(debug_assertions) {
-        LogLevel::DEBUG
-    } else {
-        LogLevel::INFO
+    let min_log = match config.log_level.as_deref() {
+        Some("debug") => LogLevel::DEBUG,
+        Some("info")  => LogLevel::INFO,
+        Some("warn")  => LogLevel::WARN,
+        Some("error") => LogLevel::ERROR,
+        Some("none")  => LogLevel::FATAL, 
+        _ => if cfg!(debug_assertions) { LogLevel::DEBUG } else { LogLevel::INFO },
     };
     // Initialize the logger based on the config or default to stdout if the log file can't be created
     let logger = match config.log_file.clone() {
@@ -152,20 +155,16 @@ fn main() {
     //Configure graceful shutdown from ctrl+c
     shutdown::setup_graceful_shutdown(&mut server, logger.clone());
 
-    logger.info(format!(
-        "Server started at http://{}:{}",
-        config.host, config.port
-    )); // Log that the server has started
+    log_info!(logger, "Server started at http:/{}:{}", config.host, config.port); // Log that the server has started
 
     // Log whether the cache is enabled based on the config setting
     if config.cache {
-        logger.info("Cache Enabled".to_string());
+        log_info!(logger, "Cache enabled");
     }
 
     // If proxy-only mode is enabled, issue a warning that local paths won't be used
     if proxy_only {
-        logger
-            .warn("WARNING: All requests are proxied to /. Local paths won't be used.".to_string());
+                log_warn!(logger, "WARNING: All requests are proxied to /. Local paths won't be used.");
     }
 
     // Create separate loggers for each component (proxy, cache, and HTTP)
@@ -182,27 +181,21 @@ fn main() {
         let req_method = req.method.to_str(); // Get the HTTP method (e.g., GET, POST)
 
         // Log the incoming request method and path
-        http_logger.info(format!("Request {} {}", req_method, req.path));
+        log_info!(http_logger, "Request {} {}", req_method, req.path);
 
         if config.cache {
-            let cache_start = Instant::now(); // Track cache operation time
+            let cache_start = Instant::now();
             let mut cache_lock = cache.lock().expect("Error locking cache");
             if let Some(response) = cache_lock.get(&req) {
-                cache_logger.debug(format!("cache hit for {}", &req.path));
-                let elapsed = start_time.elapsed();
-                http_logger.debug(format!(
-                    "Request processed in {:.6}ms",
-                    elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
-                ));
+                log_debug!(cache_logger, "cache hit for {}", req.path);
+                log_debug!(http_logger, "Request processed in {:.6}ms",
+                    start_time.elapsed().as_secs_f64() * 1000.0);
                 return Box::new(response);
             } else {
-                cache_logger.debug(format!("cache miss for {}", &req.path));
+                log_debug!(cache_logger, "cache miss for {}", req.path);
             }
-            let cache_elapsed = cache_start.elapsed();
-            cache_logger.debug(format!(
-                "Cache operation completed in {:.6}µs",
-                cache_elapsed.as_micros()
-            ));
+            log_debug!(cache_logger, "Cache operation completed in {:.6}µs",
+                cache_start.elapsed().as_micros());
         }
 
         let mut ctx = Context {
@@ -218,17 +211,14 @@ fn main() {
 
         let response = handlers.get_handler(&ctx);
         if response.is_none() {
-            logger.error("No handler found for request".to_string());
+            log_error!(logger, "No handler found for request");
             return HttpResponse::new(HttpStatus::InternalServerError, "content", None);
         }
         let response = response.unwrap().run(&mut ctx);
 
-        // Log how long the request took to process
-        let elapsed = start_time.elapsed();
-        http_logger.debug(format!(
-            "Request processed in {:.6}ms",
-            elapsed.as_secs_f64() * 1000.0 // Log the time taken in milliseconds
-        ));
+        log_debug!(http_logger, "Request processed in {:.6}ms",
+            start_time.elapsed().as_secs_f64() * 1000.0);
+
         response
         // If content was found, return it with the appropriate headers, otherwise return a 404
     });
