@@ -82,6 +82,7 @@ pub trait HttpResponseCommon {
 /// Error returned during response iteration.
 #[derive(Debug)]
 pub enum IterError {
+    IsBackground,
     WouldBlock,
     Finished,
 }
@@ -360,9 +361,9 @@ impl HttpResponseCommon for TunnelResponse {
         }
         let mut server_stream = server_stream.unwrap();
         self.stream_out = Some(server_stream.try_clone().expect("clone failed..."));
-        // let _ = client_stream
-        //     .set_nonblocking(false)
-        //     .expect("Error setting client notblocking");
+        let _ = client_stream
+            .set_nonblocking(false)
+            .expect("Error setting client notblocking");
         let _ = client_stream.set_nodelay(false);
         let _ = client_stream.set_read_timeout(Some(MAX_TIMEOUT));
         let _ = client_stream.write_all(&self.base.to_bytes());
@@ -399,12 +400,16 @@ impl HttpResponseCommon for TunnelResponse {
             // Server -> Client
             loop {
                 let r = io::copy(&mut server_stream, &mut client_stream);
-                println!("Server -> Client: {:?}", r);
-                let c2s_has_ended = has_ended.0.load(Ordering::SeqCst);
-                let server_has_error = r.is_err();
-                let server_has_ended = r.is_ok() && r.unwrap() == 0;
-                if c2s_has_ended || server_has_ended || server_has_error {
-                    break;
+                match r {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(e) => {
+                        // if e.kind() == io::ErrorKind::WouldBlock {
+                        //     continue;
+                        // }
+                        println!("Server -> Client: {:?}", e);
+                        break;
+                    }
                 }
             }
             println!("Server has ended");

@@ -38,6 +38,7 @@ pub struct Hteapot {
 enum Status {
     Read,
     Write,
+    Background,
     Finish,
 }
 
@@ -319,6 +320,10 @@ impl Hteapot {
                                 return None;
                             }
                         },
+                        Err(IterError::IsBackground) => {
+                            status.status = Status::Background;
+                            return Some(());
+                        }
                         Err(IterError::WouldBlock) => {
                             status.ttl = Instant::now();
                             return Some(());
@@ -342,6 +347,9 @@ impl Hteapot {
                     let _ = socket_data.stream.shutdown(Shutdown::Both);
                     return None;
                 }
+            }
+            Status::Background => {
+                return Some(());
             }
             Status::Finish => {
                 return None;
