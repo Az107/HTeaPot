@@ -1,3 +1,5 @@
+
+
 <h1 align="center">🍵 HTeaPot</h1>
 <p align="center"><b>A blazing-fast, minimalist HTTP server library built with Rust</b></p>
 
@@ -71,6 +73,7 @@ cargo build --release
 port = 8081        # The port to listen on
 host = "localhost" # The host address to bind to
 root = "public"    # The root directory to serve files from
+threads = 4        # Number of worker threads
 ```
 
 2. Run the server:
